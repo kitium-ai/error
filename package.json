@@ -1,0 +1,83 @@
+{
+  "name": "@kitiumai/error",
+  "version": "1.0.0",
+  "description": "Enterprise-grade error primitives for Kitium products: rich metadata, HTTP/Problem Details mapping, observability, and registry-driven error governance.",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --sourcemap --clean --target es2020 --platform node",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --sourcemap --watch --target es2020 --platform node",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "changeset": "ensure-changeset && changeset",
+    "version": "ensure-changeset && changeset version",
+    "publish:set-token": "set-npm-token",
+    "publish:setup": "set-npm-token",
+    "publish:check": "npm whoami --registry https://registry.npmjs.org || npm login --registry https://registry.npmjs.org",
+    "publish:login": "npm login --registry https://registry.npmjs.org",
+    "publish:package": "pnpm run publish:check && pnpm publish --access public --no-git-checks --registry https://registry.npmjs.org",
+    "publish:package:token": "pnpm run publish:setup && pnpm publish --access public --no-git-checks --registry https://registry.npmjs.org",
+    "publish:package:otp": "pnpm run publish:check && pnpm publish --access public --no-git-checks --registry https://registry.npmjs.org --otp",
+    "publish:dry-run": "pnpm publish --access public --no-git-checks --dry-run --registry https://registry.npmjs.org",
+    "publish:dry-run:token": "pnpm run publish:setup && pnpm publish --access public --no-git-checks --dry-run --registry https://registry.npmjs.org",
+    "release": "pnpm version && pnpm install --lockfile-only"
+  },
+  "keywords": [
+    "errors",
+    "observability",
+    "problem-details",
+    "resilience",
+    "kitium"
+  ],
+  "author": "KitiumAI",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dependencies": {
+    "@kitiumai/logger": "1.5.0",
+    "@kitiumai/types": "^1.0.0",
+    "@kitiumai/utils-ts": "^1.0.0"
+  },
+  "devDependencies": {
+    "@kitiumai/config": "^1.0.2",
+    "@kitiumai/scripts": "^0.2.1",
+    "@kitiumai/lint": "^1.3.5",
+    "@kitiumai/vitest-helpers": "^1.0.2",
+    "typescript": "^5.6.0",
+    "tsup": "7.2.0",
+    "eslint": "^9.15.0",
+    "vitest": "^2.1.8",
+    "@vitest/coverage-v8": "^2.1.8"
+  },
+  "pnpm": {
+    "overrides": {
+      "read-pkg-up": "^11.0.0",
+      "semver-diff": "^4.0.0",
+      "source-map": "^0.7.4",
+      "lodash.get": "^4.4.2",
+      "subscriptions-transport-ws": "0.11.0"
+    }
+  }
+}
