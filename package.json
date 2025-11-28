@@ -1,6 +1,6 @@
 {
   "name": "@kitiumai/error",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Enterprise-grade error primitives for Kitium products: rich metadata, HTTP/Problem Details mapping, observability, and registry-driven error governance.",
   "type": "module",
   "main": "dist/index.js",

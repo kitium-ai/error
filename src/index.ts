@@ -30,11 +30,19 @@ function cloneValue<T>(value: T): T {
   return isObject(value) ? (JSON.parse(JSON.stringify(value)) as T) : value;
 }
 
-function redactValueAtPath(target: Record<string, unknown>, path: string[], redaction: string): void {
+function redactValueAtPath(
+  target: Record<string, unknown>,
+  path: string[],
+  redaction: string
+): void {
   const [head, ...tail] = path;
-  if (!head) return;
+  if (!head) {
+    return;
+  }
 
-  if (!(head in target)) return;
+  if (!(head in target)) {
+    return;
+  }
   if (tail.length === 0) {
     target[head] = redaction;
     return;
@@ -46,8 +54,14 @@ function redactValueAtPath(target: Record<string, unknown>, path: string[], reda
   }
 }
 
-function applyRedactions(context: ErrorContext | undefined, redactPaths: string[] | undefined, redaction = '[REDACTED]') {
-  if (!context || !redactPaths?.length) return context;
+function applyRedactions(
+  context: ErrorContext | undefined,
+  redactPaths: string[] | undefined,
+  redaction = '[REDACTED]'
+): ErrorContext | undefined {
+  if (!context || !redactPaths?.length) {
+    return context;
+  }
   const clone = cloneValue(context);
   redactPaths.forEach((path) => redactValueAtPath(clone, path.split('.'), redaction));
   return clone;
@@ -110,7 +124,9 @@ export function validateErrorCode(code: string): void {
 }
 
 function validateLifecycle(lifecycle: ErrorShape['lifecycle'] | undefined): void {
-  if (!lifecycle) return;
+  if (!lifecycle) {
+    return;
+  }
   if (!['draft', 'active', 'deprecated'].includes(lifecycle)) {
     throw new Error(`Invalid lifecycle state: ${lifecycle}. Allowed: draft | active | deprecated.`);
   }
@@ -194,7 +210,9 @@ export class KitiumError extends Error implements ErrorShape {
       ...(this.userMessage !== undefined ? { userMessage: this.userMessage } : {}),
       ...(this.i18nKey !== undefined ? { i18nKey: this.i18nKey } : {}),
       ...(this.redact !== undefined ? { redact: this.redact } : {}),
-      ...(this.context !== undefined ? { context: applyRedactions(this.context, this.redact) } : {}),
+      ...(this.context !== undefined
+        ? { context: applyRedactions(this.context, this.redact) }
+        : {}),
       ...(this.cause !== undefined ? { cause: this.cause } : {}),
     };
   }
@@ -281,7 +299,8 @@ export function toKitiumError(error: unknown, fallback?: ErrorShape): KitiumErro
         lifecycle: ['draft', 'active', 'deprecated'].includes(String(shape['lifecycle']))
           ? (shape['lifecycle'] as ErrorShape['lifecycle'])
           : undefined,
-        schemaVersion: typeof shape['schemaVersion'] === 'string' ? shape['schemaVersion'] : undefined,
+        schemaVersion:
+          typeof shape['schemaVersion'] === 'string' ? shape['schemaVersion'] : undefined,
         userMessage: typeof shape['userMessage'] === 'string' ? shape['userMessage'] : undefined,
         i18nKey: typeof shape['i18nKey'] === 'string' ? shape['i18nKey'] : undefined,
         redact: Array.isArray(shape['redact']) ? (shape['redact'] as string[]) : undefined,
@@ -345,7 +364,9 @@ export function logError(error: KitiumError): void {
 const SPAN_STATUS_ERROR = 2;
 
 export function recordException(error: KitiumError, span?: TraceSpanLike): void {
-  if (!span) return;
+  if (!span) {
+    return;
+  }
   const fingerprint = getErrorFingerprint(error);
   span.setAttribute('kitium.error.code', error.code);
   span.setAttribute('kitium.error.kind', error.kind);
@@ -382,12 +403,19 @@ export function enrichError(error: KitiumError, context: Record<string, unknown>
 }
 
 function computeDelay(baseDelay: number, backoff: RetryBackoff, attempt: number): number {
-  if (backoff === 'fixed') return baseDelay;
-  if (backoff === 'linear') return baseDelay * attempt;
+  if (backoff === 'fixed') {
+    return baseDelay;
+  }
+  if (backoff === 'linear') {
+    return baseDelay * attempt;
+  }
   return baseDelay * 2 ** Math.max(0, attempt - 1);
 }
 
-export async function runWithRetry<T>(operation: () => Promise<T>, options?: RetryOptions): Promise<RetryOutcome<T>> {
+export async function runWithRetry<T>(
+  operation: () => Promise<T>,
+  options?: RetryOptions
+): Promise<RetryOutcome<T>> {
   const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
   const baseDelay = options?.baseDelayMs ?? 200;
   const backoff = options?.backoff ?? 'exponential';
