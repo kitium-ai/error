@@ -14,6 +14,10 @@ Enterprise-grade error primitives for Kitium products. This library provides a s
 - ✅ **Structured Logging**: Severity-aware logging with `@kitiumai/logger`
 - ✅ **Context Enrichment**: Safe context merging for distributed tracing
 - ✅ **Error Normalization**: Convert unknown errors to consistent shape
+- ✅ **Lifecycle + Redaction**: Registry-driven lifecycle states, schema versions, and PII redaction controls
+- ✅ **Safe Messaging**: Separate internal `message` from localized `userMessage`/`i18nKey`
+- ✅ **Retry Execution Helper**: `runWithRetry` executes retry policies consistently
+- ✅ **Tracing Helper**: `recordException` propagates error metadata into spans
 
 ## Installation
 
@@ -46,6 +50,10 @@ httpErrorRegistry.register({
   severity: 'warning',
   kind: 'auth',
   retryable: false,
+  lifecycle: 'active',
+  schemaVersion: '2024-12-01',
+  userMessage: 'You do not have permission to perform this action',
+  redact: ['context.userId'],
   docs: 'https://docs.kitium.ai/errors/auth/forbidden',
 });
 
@@ -67,7 +75,7 @@ logError(err);
 const problem = problemDetailsFrom(err);
 // {
 //   type: 'https://docs.kitium.ai/errors/auth/forbidden',
-//   title: 'You cannot access this resource',
+//   title: 'You do not have permission to perform this action',
 //   status: 403,
 //   instance: 'corr-123',
 //   extensions: {
@@ -75,7 +83,7 @@ const problem = problemDetailsFrom(err);
 //     severity: 'warning',
 //     retryable: false,
 //     kind: 'auth',
-//     context: { correlationId: 'corr-123', userId: 'user-456' }
+//     context: { correlationId: 'corr-123', userId: '[REDACTED]' }
 //   }
 // }
 ```
@@ -121,6 +129,51 @@ app.use((err: unknown, req: express.Request, res: express.Response, next: expres
   const problem = problemDetailsFrom(enrichedError);
   res.status(problem.status || 500).json(problem);
 });
+```
+
+### Running operations with built-in retry semantics
+
+```ts
+import { runWithRetry, DependencyError } from '@kitiumai/error';
+
+const result = await runWithRetry(
+  async () => {
+    const response = await fetch('https://example.com/api');
+    if (!response.ok) {
+      throw new DependencyError({
+        code: 'dependency/upstream_unavailable',
+        message: 'Partner API unavailable',
+        retryDelay: 500,
+        maxRetries: 3,
+      });
+    }
+    return response.json();
+  },
+  {
+    maxAttempts: 4,
+    onAttempt: (attempt, error) => console.warn('retry attempt', attempt, error.code),
+  }
+);
+
+if (result.error) {
+  // Exhausted retries; result.error is a KitiumError
+}
+```
+
+### Recording enriched exceptions into tracing spans
+
+```ts
+import { context, trace } from '@opentelemetry/api';
+import { recordException, toKitiumError } from '@kitiumai/error';
+
+const span = trace.getSpan(context.active());
+try {
+  await doWork();
+} catch (err) {
+  const kitium = toKitiumError(err);
+  recordException(kitium, span);
+  throw kitium;
+}
 ```
 
 ### Error Registry Pattern

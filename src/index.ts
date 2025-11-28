@@ -9,6 +9,9 @@ import {
   ErrorContext,
   ErrorMetrics,
   RetryBackoff,
+  RetryOutcome,
+  RetryOptions,
+  TraceSpanLike,
 } from './types';
 
 const DEFAULT_DOCS_URL = 'https://docs.kitium.ai/errors';
@@ -21,6 +24,33 @@ const log = getLogger();
  */
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function cloneValue<T>(value: T): T {
+  return isObject(value) ? (JSON.parse(JSON.stringify(value)) as T) : value;
+}
+
+function redactValueAtPath(target: Record<string, unknown>, path: string[], redaction: string): void {
+  const [head, ...tail] = path;
+  if (!head) return;
+
+  if (!(head in target)) return;
+  if (tail.length === 0) {
+    target[head] = redaction;
+    return;
+  }
+
+  const next = target[head];
+  if (isObject(next)) {
+    redactValueAtPath(next, tail, redaction);
+  }
+}
+
+function applyRedactions(context: ErrorContext | undefined, redactPaths: string[] | undefined, redaction = '[REDACTED]') {
+  if (!context || !redactPaths?.length) return context;
+  const clone = cloneValue(context);
+  redactPaths.forEach((path) => redactValueAtPath(clone, path.split('.'), redaction));
+  return clone;
 }
 
 // Error code validation pattern: lowercase alphanumeric with underscores and forward slashes
@@ -79,11 +109,20 @@ export function validateErrorCode(code: string): void {
   }
 }
 
+function validateLifecycle(lifecycle: ErrorShape['lifecycle'] | undefined): void {
+  if (!lifecycle) return;
+  if (!['draft', 'active', 'deprecated'].includes(lifecycle)) {
+    throw new Error(`Invalid lifecycle state: ${lifecycle}. Allowed: draft | active | deprecated.`);
+  }
+}
+
 export class KitiumError extends Error implements ErrorShape {
   readonly code: string;
   readonly statusCode?: number;
   readonly severity: ErrorSeverity;
   readonly kind: ErrorKind;
+  readonly lifecycle?: ErrorShape['lifecycle'];
+  readonly schemaVersion?: string;
   readonly retryable: boolean;
   readonly retryDelay?: number;
   readonly maxRetries?: number;
@@ -91,6 +130,9 @@ export class KitiumError extends Error implements ErrorShape {
   readonly help?: string;
   readonly docs?: string;
   readonly source?: string;
+  readonly userMessage?: string;
+  readonly i18nKey?: string;
+  readonly redact?: string[];
   readonly context?: ErrorContext;
   readonly cause?: unknown;
 
@@ -101,11 +143,14 @@ export class KitiumError extends Error implements ErrorShape {
     if (validateCode) {
       validateErrorCode(shape.code);
     }
+    validateLifecycle(shape.lifecycle);
 
     this.code = shape.code;
     this.statusCode = shape.statusCode;
     this.severity = shape.severity;
     this.kind = shape.kind;
+    this.lifecycle = shape.lifecycle;
+    this.schemaVersion = shape.schemaVersion;
     this.retryable = shape.retryable;
     this.retryDelay = shape.retryDelay;
     this.maxRetries = shape.maxRetries;
@@ -113,6 +158,9 @@ export class KitiumError extends Error implements ErrorShape {
     this.help = shape.help;
     this.docs = shape.docs;
     this.source = shape.source;
+    this.userMessage = shape.userMessage;
+    this.i18nKey = shape.i18nKey;
+    this.redact = shape.redact;
     this.context = shape.context;
     this.cause = shape.cause;
 
@@ -134,6 +182,8 @@ export class KitiumError extends Error implements ErrorShape {
       ...(this.statusCode !== undefined ? { statusCode: this.statusCode } : {}),
       severity: this.severity,
       kind: this.kind,
+      ...(this.lifecycle !== undefined ? { lifecycle: this.lifecycle } : {}),
+      ...(this.schemaVersion !== undefined ? { schemaVersion: this.schemaVersion } : {}),
       retryable: this.retryable,
       ...(this.retryDelay !== undefined ? { retryDelay: this.retryDelay } : {}),
       ...(this.maxRetries !== undefined ? { maxRetries: this.maxRetries } : {}),
@@ -141,7 +191,10 @@ export class KitiumError extends Error implements ErrorShape {
       ...(this.help !== undefined ? { help: this.help } : {}),
       ...(this.docs !== undefined ? { docs: this.docs } : {}),
       ...(this.source !== undefined ? { source: this.source } : {}),
-      ...(this.context !== undefined ? { context: this.context } : {}),
+      ...(this.userMessage !== undefined ? { userMessage: this.userMessage } : {}),
+      ...(this.i18nKey !== undefined ? { i18nKey: this.i18nKey } : {}),
+      ...(this.redact !== undefined ? { redact: this.redact } : {}),
+      ...(this.context !== undefined ? { context: applyRedactions(this.context, this.redact) } : {}),
       ...(this.cause !== undefined ? { cause: this.cause } : {}),
     };
   }
@@ -152,8 +205,12 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
 
   const toProblemDetails = (error: ErrorShape): ProblemDetails => {
     const entry = entries.get(error.code) ?? defaults;
+    const redactions = error.redact ?? entry?.redact;
+    const context = applyRedactions(error.context, redactions);
     const typeUrl = entry?.docs ?? error.docs ?? `${DEFAULT_DOCS_URL}/${error.code}`;
     const status = error.statusCode ?? entry?.statusCode;
+    const userMessage = error.userMessage ?? entry?.userMessage;
+    const lifecycle = error.lifecycle ?? entry?.lifecycle;
 
     if (entry?.toProblem) {
       return entry.toProblem(error);
@@ -161,7 +218,7 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
 
     return {
       type: typeUrl,
-      title: error.message,
+      title: userMessage ?? error.message,
       ...(status !== undefined ? { status } : {}),
       ...(error.help !== undefined ? { detail: error.help } : {}),
       ...((error.context?.correlationId ?? error.context?.requestId)
@@ -171,11 +228,15 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
         code: error.code,
         severity: error.severity,
         retryable: error.retryable,
+        ...(lifecycle !== undefined ? { lifecycle } : {}),
+        ...(error.schemaVersion !== undefined ? { schemaVersion: error.schemaVersion } : {}),
         ...(error.retryDelay !== undefined ? { retryDelay: error.retryDelay } : {}),
         ...(error.maxRetries !== undefined ? { maxRetries: error.maxRetries } : {}),
         ...(error.backoff !== undefined ? { backoff: error.backoff } : {}),
         kind: error.kind,
-        ...(error.context !== undefined ? { context: error.context } : {}),
+        ...(context !== undefined ? { context } : {}),
+        ...(userMessage !== undefined ? { userMessage } : {}),
+        ...((error.i18nKey ?? entry?.i18nKey) ? { i18nKey: error.i18nKey ?? entry?.i18nKey } : {}),
         ...((error.source ?? entry?.source) ? { source: error.source ?? entry?.source } : {}),
       },
     };
@@ -184,6 +245,7 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
   return {
     register(entry: ErrorRegistryEntry): void {
       validateErrorCode(entry.code);
+      validateLifecycle(entry.lifecycle ?? defaults?.lifecycle);
       entries.set(entry.code, { ...defaults, ...entry });
     },
     resolve(code: string): ErrorRegistryEntry | undefined {
@@ -216,6 +278,13 @@ export function toKitiumError(error: unknown, fallback?: ErrorShape): KitiumErro
         help: typeof shape['help'] === 'string' ? shape['help'] : undefined,
         docs: typeof shape['docs'] === 'string' ? shape['docs'] : undefined,
         source: typeof shape['source'] === 'string' ? shape['source'] : undefined,
+        lifecycle: ['draft', 'active', 'deprecated'].includes(String(shape['lifecycle']))
+          ? (shape['lifecycle'] as ErrorShape['lifecycle'])
+          : undefined,
+        schemaVersion: typeof shape['schemaVersion'] === 'string' ? shape['schemaVersion'] : undefined,
+        userMessage: typeof shape['userMessage'] === 'string' ? shape['userMessage'] : undefined,
+        i18nKey: typeof shape['i18nKey'] === 'string' ? shape['i18nKey'] : undefined,
+        redact: Array.isArray(shape['redact']) ? (shape['redact'] as string[]) : undefined,
         context: isObject(shape['context']) ? (shape['context'] as ErrorContext) : undefined,
         cause: shape['cause'],
       },
@@ -239,6 +308,8 @@ export function toKitiumError(error: unknown, fallback?: ErrorShape): KitiumErro
 }
 
 export function logError(error: KitiumError): void {
+  const entry = httpErrorRegistry.resolve(error.code);
+  const context = applyRedactions(error.context, error.redact ?? entry?.redact);
   const payload = {
     code: error.code,
     message: error.message,
@@ -248,8 +319,10 @@ export function logError(error: KitiumError): void {
     ...(error.retryDelay !== undefined ? { retryDelay: error.retryDelay } : {}),
     ...(error.maxRetries !== undefined ? { maxRetries: error.maxRetries } : {}),
     ...(error.backoff !== undefined ? { backoff: error.backoff } : {}),
-    ...(error.context !== undefined ? { context: error.context } : {}),
+    ...(context !== undefined ? { context } : {}),
     ...(error.source !== undefined ? { source: error.source } : {}),
+    ...(error.schemaVersion !== undefined ? { schemaVersion: error.schemaVersion } : {}),
+    ...(error.lifecycle !== undefined ? { lifecycle: error.lifecycle } : {}),
     fingerprint: getErrorFingerprint(error),
   };
 
@@ -269,6 +342,29 @@ export function logError(error: KitiumError): void {
   }
 }
 
+const SPAN_STATUS_ERROR = 2;
+
+export function recordException(error: KitiumError, span?: TraceSpanLike): void {
+  if (!span) return;
+  const fingerprint = getErrorFingerprint(error);
+  span.setAttribute('kitium.error.code', error.code);
+  span.setAttribute('kitium.error.kind', error.kind);
+  span.setAttribute('kitium.error.severity', error.severity);
+  span.setAttribute('kitium.error.retryable', error.retryable);
+  span.setAttribute('kitium.error.fingerprint', fingerprint);
+  if (error.lifecycle) {
+    span.setAttribute('kitium.error.lifecycle', error.lifecycle);
+  }
+  if (error.schemaVersion) {
+    span.setAttribute('kitium.error.schema_version', error.schemaVersion);
+  }
+  if (error.statusCode) {
+    span.setAttribute('http.status_code', error.statusCode);
+  }
+  span.recordException({ ...error.toJSON(), name: error.name });
+  span.setStatus({ code: SPAN_STATUS_ERROR, message: error.message });
+}
+
 export const httpErrorRegistry = createErrorRegistry({
   statusCode: 500,
   severity: 'error',
@@ -283,6 +379,42 @@ export function problemDetailsFrom(error: KitiumError): ProblemDetails {
 export function enrichError(error: KitiumError, context: Record<string, unknown>): KitiumError {
   const mergedContext = { ...(error.context ?? {}), ...context };
   return new KitiumError({ ...error.toJSON(), context: mergedContext }, false);
+}
+
+function computeDelay(baseDelay: number, backoff: RetryBackoff, attempt: number): number {
+  if (backoff === 'fixed') return baseDelay;
+  if (backoff === 'linear') return baseDelay * attempt;
+  return baseDelay * 2 ** Math.max(0, attempt - 1);
+}
+
+export async function runWithRetry<T>(operation: () => Promise<T>, options?: RetryOptions): Promise<RetryOutcome<T>> {
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
+  const baseDelay = options?.baseDelayMs ?? 200;
+  const backoff = options?.backoff ?? 'exponential';
+
+  let attempt = 0;
+  let lastDelay: number | undefined;
+
+  while (attempt < maxAttempts) {
+    attempt++;
+    try {
+      const result = await operation();
+      return { attempts: attempt, result, lastDelayMs: lastDelay };
+    } catch (err) {
+      const kitiumError = toKitiumError(err);
+      options?.onAttempt?.(attempt, kitiumError);
+      if (!kitiumError.retryable || attempt >= maxAttempts) {
+        return { attempts: attempt, error: kitiumError, lastDelayMs: lastDelay };
+      }
+
+      const delay = kitiumError.retryDelay ?? baseDelay;
+      const backoffStrategy = kitiumError.backoff ?? backoff;
+      lastDelay = computeDelay(delay, backoffStrategy, attempt);
+      await new Promise((resolve) => setTimeout(resolve, lastDelay));
+    }
+  }
+
+  return { attempts: attempt, lastDelayMs: lastDelay };
 }
 
 /**

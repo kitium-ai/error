@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Lifecycle metadata validation and schema version tags on errors and registry entries to support governed evolution.
+- Redaction-aware context handling and safe user messaging in JSON serialization and RFC 7807 Problem Details rendering.
+- Tracing (`recordException`) and retry (`runWithRetry`) helpers that propagate retry metadata, backoff choices, and attempt counts.
+
+### Changed
+
+- Default Problem Details output now prioritizes registry-provided docs, lifecycle, and schema version metadata when present.
+
 ## [1.0.0] - 2024-12-19
 
 ### Added
@@ -177,4 +189,5 @@ None - this is the initial release.
 
 ---
 
+[Unreleased]: https://github.com/kitiumai/kitium/compare/%40kitiumai%2Ferror%401.0.0...HEAD
 [1.0.0]: https://github.com/kitiumai/kitium/releases/tag/%40kitiumai%2Ferror%401.0.0
