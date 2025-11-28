@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 #### Core Features
+
 - **KitiumError class**: Enterprise-grade error class with rich metadata support
   - Error code, message, HTTP status code
   - Severity levels: `fatal`, `error`, `warning`, `info`, `debug`
@@ -21,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Full JSON serialization via `toJSON()` method
 
 #### Error Registry System
+
 - **Error Registry API**: Centralized error code management
   - `createErrorRegistry()` - Create custom error registries with defaults
   - `httpErrorRegistry` - Pre-configured HTTP error registry
@@ -30,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Error fingerprinting support for observability grouping
 
 #### RFC 7807 Problem Details Support
+
 - Full compliance with [RFC 7807 Problem Details for HTTP APIs](https://tools.ietf.org/html/rfc7807)
 - `problemDetailsFrom()` - Convert errors to Problem Details format
 - Automatic type URL generation from documentation URLs
@@ -37,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Instance field support via correlation/request IDs
 
 #### Retry Strategy Metadata
+
 - **Retry Information**: Detailed retry strategy support
   - `retryable` - Boolean flag for retry eligibility
   - `retryDelay` - Initial retry delay in milliseconds
@@ -46,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Logged in structured error logs
 
 #### Error Code Validation
+
 - **Automatic Validation**: Error code format validation
   - Pattern: `^[a-z0-9_]+(\/[a-z0-9_]+)*$`
   - `isValidErrorCode()` - Check if error code format is valid
@@ -55,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Clear error messages for invalid codes
 
 #### Typed Error Subclasses
+
 - **Type-Safe Error Classes**: Pre-configured error subclasses with sensible defaults
   - `ValidationError` - Validation errors (400, warning, non-retryable)
   - `AuthenticationError` - Authentication failures (401, error, non-retryable)
@@ -67,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `InternalError` - Internal server errors (500, error, non-retryable)
 
 #### Error Fingerprinting
+
 - **Observability Support**: Error grouping for monitoring systems
   - `getErrorFingerprint()` - Generate fingerprint for error grouping
   - Registry-based fingerprint support
@@ -74,6 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Included in structured logging payload
 
 #### Error Metrics
+
 - **Built-in Metrics**: Error tracking and analytics
   - `getErrorMetrics()` - Get current error metrics snapshot
   - `resetErrorMetrics()` - Reset metrics (useful for testing)
@@ -82,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatic metrics collection on error creation
 
 #### Error Utilities
+
 - **Helper Functions**: Utility functions for error handling
   - `toKitiumError()` - Normalize unknown errors to `KitiumError`
   - `enrichError()` - Safely merge additional context into errors
@@ -89,6 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Integration with `@kitiumai/logger` for observability
 
 #### Structured Logging
+
 - **Severity-Aware Logging**: Automatic log routing by severity
   - `fatal`/`error` → `log.error()`
   - `warning` → `log.warn()`
@@ -97,6 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Includes error code, message, severity, retry info, context, source, fingerprint
 
 #### TypeScript Support
+
 - **Full Type Safety**: Comprehensive TypeScript definitions
   - All types exported from `./types`
   - Strict type checking for error shapes
@@ -105,6 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Type-safe retry metadata
 
 #### Documentation
+
 - **Comprehensive Documentation**: Complete API reference
   - README with quick start guide
   - Error code conventions and best practices
@@ -115,11 +127,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Technical Details
 
 #### Dependencies
+
 - `@kitiumai/logger` - Structured logging integration
 - `@kitiumai/types` - Shared type definitions
 - `@kitiumai/utils-ts` - TypeScript utility functions
 
 #### Build Configuration
+
 - TypeScript 5.6+
 - ESM and CommonJS dual package support
 - Source maps for debugging
@@ -127,6 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ES2020 target
 
 #### Package Exports
+
 - ESM: `dist/index.mjs`
 - CommonJS: `dist/index.js`
 - TypeScript: `dist/index.d.ts`
@@ -141,6 +156,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Comparison with Industry Standards
 
 This package matches or exceeds error handling capabilities of:
+
 - **Microsoft Azure**: RFC 7807 compliance, error registry pattern
 - **Google Cloud**: Error registry, request tracking, structured errors
 - **AWS**: Error codes, request IDs, retry information
@@ -162,4 +178,3 @@ None - this is the initial release.
 ---
 
 [1.0.0]: https://github.com/kitiumai/kitium/releases/tag/%40kitiumai%2Ferror%401.0.0
-

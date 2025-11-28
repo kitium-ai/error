@@ -1,5 +1,4 @@
 import { getLogger } from '@kitiumai/logger';
-import { isObject } from '@kitiumai/utils-ts';
 import {
   ErrorKind,
   ErrorRegistry,
@@ -14,6 +13,15 @@ import {
 
 const DEFAULT_DOCS_URL = 'https://docs.kitium.ai/errors';
 const log = getLogger();
+
+/**
+ * Type guard to check if value is a plain object
+ * @param value - Value to check
+ * @returns true if value is a plain object
+ */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 // Error code validation pattern: lowercase alphanumeric with underscores and forward slashes
 // Examples: "auth/forbidden", "validation/required_field", "internal/server_error"
@@ -89,11 +97,11 @@ export class KitiumError extends Error implements ErrorShape {
   constructor(shape: ErrorShape, validateCode = true) {
     super(shape.message);
     this.name = 'KitiumError';
-    
+
     if (validateCode) {
       validateErrorCode(shape.code);
     }
-    
+
     this.code = shape.code;
     this.statusCode = shape.statusCode;
     this.severity = shape.severity;
@@ -156,7 +164,7 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
       title: error.message,
       ...(status !== undefined ? { status } : {}),
       ...(error.help !== undefined ? { detail: error.help } : {}),
-      ...(error.context?.correlationId ?? error.context?.requestId
+      ...((error.context?.correlationId ?? error.context?.requestId)
         ? { instance: error.context?.correlationId ?? error.context?.requestId }
         : {}),
       extensions: {
@@ -168,7 +176,7 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
         ...(error.backoff !== undefined ? { backoff: error.backoff } : {}),
         kind: error.kind,
         ...(error.context !== undefined ? { context: error.context } : {}),
-        ...(error.source ?? entry?.source ? { source: error.source ?? entry?.source } : {}),
+        ...((error.source ?? entry?.source) ? { source: error.source ?? entry?.source } : {}),
       },
     };
   };

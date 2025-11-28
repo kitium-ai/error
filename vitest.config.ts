@@ -1,10 +1,9 @@
-import { createKitiumVitestConfig, loadKitiumVitestBaseConfig } from '@kitiumai/vitest-helpers';
+import { createKitiumVitestConfig } from '@kitiumai/vitest-helpers/config';
+import { defineConfig } from 'vitest/config';
 
-const baseConfig = loadKitiumVitestBaseConfig();
-
-export default createKitiumVitestConfig({
-  environment: 'node',
-  overrides: {
-    ...baseConfig,
-  },
-});
+export default defineConfig(
+  createKitiumVitestConfig({
+    preset: 'library',
+    environment: 'node',
+  })
+);
