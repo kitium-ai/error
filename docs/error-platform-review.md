@@ -55,33 +55,40 @@ This review evaluates the current `@kitiumai/error` package against patterns com
 ## Recommendations
 
 ### API and type consistency
+
 - Add **error schema version** and **lifecycle state** (`draft` | `active` | `deprecated`) to `ErrorRegistryEntry`, enforcing validation during registration.
 - Allow **extensible kinds** by letting registries accept string literals beyond the default enum, while preserving a core recommended set.
 - Provide **factory helpers** that generate typed error classes from registry entries to keep enums and registries aligned without manual subclassing.
 
 ### Safety and compliance
+
 - Introduce **redaction rules** on registry entries (e.g., `redact: ['context.userId', 'context.email']`) and apply them in `toJSON`, `logError`, and `problemDetailsFrom` to prevent PII leakage.
 - Add **safe client message** fields (`userMessage` / `i18nKey`) separate from internal `message`, and allow Problem Details generation to choose safe text for clients.
 
 ### Observability and tracing
+
 - Provide **OpenTelemetry helpers**:
   - `recordException(error, span)` that sets span status and attributes (code, severity, retryable, fingerprint).
   - **Logger correlation**: include trace/span IDs automatically when available, and add a hook to format fingerprints consistently across services.
 - Extend metrics to **export via callbacks** (e.g., `onErrorRecorded(error, metrics)` or a `metricsAdapter`) so teams can send data to Prometheus/Otel.
 
 ### Retry execution utilities
+
 - Add a **`runWithRetry` helper** that reads retry metadata from `KitiumError` or registry defaults, applies backoff, and surfaces a standardized `RetryOutcome` with metrics.
 - Offer **decorators/wrappers** for dependency calls that automatically convert thrown errors to `KitiumError`, apply retry policy, and enrich context.
 
 ### Error governance tooling
+
 - Ship a **CLI** (`kitium-errors lint|list|generate`) to validate registry files, check code uniqueness, and emit documentation/TypeScript definitions for downstream services.
 - Support **registry persistence** (e.g., loading from JSON/YAML) so service teams can manage catalogs without code changes and publish them centrally.
 
 ### Framework integrations
+
 - Export **middleware/factory helpers**: `createExpressErrorMiddleware`, `fastifyErrorHandler`, `graphqlFormatError`, each normalizing unknown errors, enriching context, logging, and returning Problem Details consistently.
 - Provide **job runner adapters** (BullMQ/Temporal) that map operational errors to `KitiumError` with retry metadata respected by the scheduler.
 
 ### Developer experience
+
 - Add **test utilities** (e.g., `expectKitiumError`, `resetErrorMetrics` already exists) plus fixtures for registry validation and snapshotting Problem Details.
 - Publish **recipes and code mods** to migrate legacy error patterns to `KitiumError`, ensuring consistent adoption across repos.
 
