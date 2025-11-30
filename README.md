@@ -2,6 +2,18 @@
 
 Enterprise-grade error primitives for Kitium products. This library provides a single source of truth for error taxonomy, structured logging, HTTP/Problem Details mapping, and registry-driven governance – the kind of capabilities expected in large-scale products.
 
+## Usage & Tree-Shaking
+
+This package is ESM-first and `sideEffects: false`. Import only what you need using subpath exports to keep bundles lean.
+
+- Core runtime:
+  - `import { KitiumError, ValidationError, problemDetailsFrom } from '@kitiumai/error'`
+
+- Types-only:
+  - `import type { ErrorShape, ProblemDetails } from '@kitiumai/error/types'`
+
+Use `@kitiumai/error/types` when you only need type imports to avoid pulling runtime code.
+
 ## Features
 
 - ✅ **Typed Error Classes**: `KitiumError` with rich metadata and typed subclasses for common error types
