@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   tag-release:
-    name: "Create Release Tag"
+    name: 'Create Release Tag'
     runs-on: ubuntu-latest
     container:
       image: docker.io/ashishyd/kitiumai-dev:latest
@@ -76,9 +76,9 @@ jobs:
       - name: Shared setup (build, lint, test)
         uses: ./.github/actions/kitium-shared-setup
         with:
-          run-build: "true"
-          run-tests: "true"
-          run-lint: "true"
+          run-build: 'true'
+          run-tests: 'true'
+          run-lint: 'true'
 
       - name: Check package version
         id: version_check

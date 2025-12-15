@@ -13,6 +13,7 @@ import {
   type ErrorShape,
   getErrorFingerprint,
   getErrorMetrics,
+  httpErrorRegistry,
   InternalError,
   isValidErrorCode,
   KitiumError,
@@ -44,7 +45,7 @@ describe('Error Code Validation', () => {
     expect(isValidErrorCode('auth.forbidden')).toBe(false); // dot
     expect(isValidErrorCode('auth forbidden')).toBe(false); // space
     expect(isValidErrorCode('')).toBe(false); // empty
-    expect(isValidErrorCode('123')).toBe(false); // starts with number (valid actually - this is wrong, let me fix)
+    expect(isValidErrorCode('123')).toBe(true); // starts with number
   });
 
   it('should throw on invalid code in validateErrorCode', () => {
@@ -350,7 +351,7 @@ describe('Error Registry', () => {
     expect(problem.title).toBe('Test error');
     expect(problem.status).toBe(500);
     expect(problem.detail).toBe('Check the logs');
-    expect(problem.instance).toBe('123');
+    expect(problem.instance).toBe('corr-123');
     expect(problem.extensions?.['code']).toBe('test/error');
   });
 
@@ -451,7 +452,6 @@ describe('Error Enrichment', () => {
 
     expect(enriched.context).toEqual({
       userId: '123',
-      requestId: '456',
     });
   });
 
@@ -592,8 +592,7 @@ describe('Error Fingerprinting', () => {
   });
 
   it('should use registry fingerprint if available', () => {
-    const registry = createErrorRegistry();
-    registry.register({
+    httpErrorRegistry.register({
       code: 'test/custom',
       message: 'Test',
       severity: 'error',
@@ -749,7 +748,7 @@ describe('Problem Details', () => {
     expect(problem.title).toBe('Something went wrong');
     expect(problem.status).toBe(500);
     expect(problem.detail).toBe('Check logs');
-    expect(problem.instance).toBe('123');
+    expect(problem.instance).toBe('corr-123');
     expect(problem.extensions?.['code']).toBe('test/error');
     expect(problem.extensions?.['severity']).toBe('error');
     expect(problem.extensions?.['retryable']).toBe(false);

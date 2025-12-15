@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   release:
-    name: "Release"
+    name: 'Release'
     runs-on: ubuntu-latest
     container:
       image: docker.io/ashishyd/kitiumai-dev:latest
@@ -68,10 +68,10 @@ jobs:
       - name: Shared setup (install + verify)
         uses: ./.github/actions/kitium-shared-setup
         with:
-          run-build: "true"
-          run-tests: "true"
-          run-lint: "true"
-          run-typecheck: "true"
+          run-build: 'true'
+          run-tests: 'true'
+          run-lint: 'true'
+          run-typecheck: 'true'
 
       - name: Security checks
         run: |
@@ -142,7 +142,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          release_name: "error ${{ steps.version.outputs.version }}"
+          release_name: 'error ${{ steps.version.outputs.version }}'
           body: |
             ## 🚀 Release error@${{ steps.version.outputs.version }}
 

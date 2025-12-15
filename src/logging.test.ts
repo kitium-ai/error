@@ -1,19 +1,65 @@
 /* eslint-disable max-lines-per-function, sonarjs/no-duplicate-string */
-import { createIsolatedMockLogger } from '@kitiumai/logger';
-import * as loggerModule from '@kitiumai/logger';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { KitiumError, logError, resetErrorMetrics } from './index';
 
+type LogLevel = 'error' | 'warn' | 'info' | 'debug';
+
+type LogEntry = {
+  level: LogLevel;
+  message: string;
+  meta?: unknown;
+};
+
+type MockLoggerInstance = {
+  logger: {
+    error: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+    info: (...args: unknown[]) => void;
+    debug: (...args: unknown[]) => void;
+  };
+  getLogs: () => readonly LogEntry[];
+};
+
+function createMockLogger(): MockLoggerInstance {
+  const logs: LogEntry[] = [];
+
+  const push = (level: LogLevel, message: unknown, meta: unknown): void => {
+    logs.push({
+      level,
+      message: typeof message === 'string' ? message : String(message),
+      meta,
+    });
+  };
+
+  return {
+    logger: {
+      error: (message: unknown, meta?: unknown) => push('error', message, meta),
+      warn: (message: unknown, meta?: unknown) => push('warn', message, meta),
+      info: (message: unknown, meta?: unknown) => push('info', message, meta),
+      debug: (message: unknown, meta?: unknown) => push('debug', message, meta),
+    },
+    getLogs: () => logs,
+  };
+}
+
+vi.mock('@kitiumai/logger', () => {
+  return {
+    getLogger: vi.fn(),
+  };
+});
+
 describe('Error Logging', () => {
-  let mockLoggerInstance: ReturnType<typeof createIsolatedMockLogger>;
+  let mockLoggerInstance: ReturnType<typeof createMockLogger>;
+  let getLoggerMock: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     resetErrorMetrics();
-    mockLoggerInstance = createIsolatedMockLogger();
+    mockLoggerInstance = createMockLogger();
 
-    // Mock getLogger to return our mock
-    vi.spyOn(loggerModule, 'getLogger').mockReturnValue(mockLoggerInstance.logger);
+    const loggerModule = await import('@kitiumai/logger');
+    getLoggerMock = loggerModule.getLogger as unknown as ReturnType<typeof vi.fn>;
+    getLoggerMock.mockReturnValue(mockLoggerInstance.logger);
   });
 
   it('should log fatal errors with error method', () => {

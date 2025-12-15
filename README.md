@@ -22,6 +22,7 @@
 Modern applications face complex error handling challenges:
 
 ### The Problem
+
 - **Inconsistent Error Types**: Different services use different error formats
 - **Poor Observability**: Errors lack context for debugging and monitoring
 - **HTTP API Inconsistencies**: No standardized error response format
@@ -31,6 +32,7 @@ Modern applications face complex error handling challenges:
 - **Rate Limiting Issues**: No standardized way to handle rate limit errors
 
 ### The Solution
+
 `@kitiumai/error` provides a single source of truth for error handling that:
 
 - **Standardizes Error Format**: Consistent error structure across all services
@@ -43,22 +45,23 @@ Modern applications face complex error handling challenges:
 
 ## Competitor Comparison
 
-| Feature | @kitiumai/error | Google APIs | AWS SDK | Stripe API | Apollo GraphQL |
-|---------|----------------|-------------|---------|------------|----------------|
-| **Error Taxonomy** | ✅ Typed classes | ❌ Manual codes | ❌ Inconsistent | ❌ Manual codes | ❌ Basic types |
-| **RFC 7807 Support** | ✅ Full compliance | ❌ Partial | ❌ None | ❌ None | ❌ None |
-| **Retry Semantics** | ✅ Built-in helpers | ❌ Manual | ❌ Manual | ❌ Manual | ❌ Manual |
-| **Observability** | ✅ Fingerprinting + metrics | ❌ Basic | ❌ Basic | ❌ Basic | ❌ Basic |
-| **PII Redaction** | ✅ Configurable | ❌ None | ❌ None | ❌ None | ❌ None |
-| **i18n Support** | ✅ Parameterized messages | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Rate Limiting** | ✅ Built-in types | ❌ Manual | ❌ Manual | ❌ Manual | ❌ Manual |
-| **TypeScript First** | ✅ Strict types | ❌ JavaScript | ❌ JavaScript | ❌ JavaScript | ❌ JavaScript |
-| **Registry System** | ✅ Centralized | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Tracing Integration** | ✅ OpenTelemetry | ❌ None | ❌ None | ❌ None | ❌ None |
+| Feature                 | @kitiumai/error             | Google APIs     | AWS SDK         | Stripe API      | Apollo GraphQL |
+| ----------------------- | --------------------------- | --------------- | --------------- | --------------- | -------------- |
+| **Error Taxonomy**      | ✅ Typed classes            | ❌ Manual codes | ❌ Inconsistent | ❌ Manual codes | ❌ Basic types |
+| **RFC 7807 Support**    | ✅ Full compliance          | ❌ Partial      | ❌ None         | ❌ None         | ❌ None        |
+| **Retry Semantics**     | ✅ Built-in helpers         | ❌ Manual       | ❌ Manual       | ❌ Manual       | ❌ Manual      |
+| **Observability**       | ✅ Fingerprinting + metrics | ❌ Basic        | ❌ Basic        | ❌ Basic        | ❌ Basic       |
+| **PII Redaction**       | ✅ Configurable             | ❌ None         | ❌ None         | ❌ None         | ❌ None        |
+| **i18n Support**        | ✅ Parameterized messages   | ❌ None         | ❌ None         | ❌ None         | ❌ None        |
+| **Rate Limiting**       | ✅ Built-in types           | ❌ Manual       | ❌ Manual       | ❌ Manual       | ❌ Manual      |
+| **TypeScript First**    | ✅ Strict types             | ❌ JavaScript   | ❌ JavaScript   | ❌ JavaScript   | ❌ JavaScript  |
+| **Registry System**     | ✅ Centralized              | ❌ None         | ❌ None         | ❌ None         | ❌ None        |
+| **Tracing Integration** | ✅ OpenTelemetry            | ❌ None         | ❌ None         | ❌ None         | ❌ None        |
 
 ## Unique Selling Proposition (USP)
 
 ### **Enterprise-Grade Error Handling**
+
 While other libraries provide basic error classes, `@kitiumai/error` delivers enterprise-grade error management that scales with your business:
 
 - **Big Tech Standards**: Implements patterns used by Google, AWS, and Stripe
@@ -68,6 +71,7 @@ While other libraries provide basic error classes, `@kitiumai/error` delivers en
 - **Future Proof**: Extensible design for evolving requirements
 
 ### **Single Source of Truth**
+
 Centralized error management eliminates inconsistencies across services:
 
 - **Registry-Driven**: All error definitions in one place
@@ -77,6 +81,7 @@ Centralized error management eliminates inconsistencies across services:
 - **Governance**: Lifecycle management for error evolution
 
 ### **Observability Excellence**
+
 Superior monitoring and debugging capabilities:
 
 - **Error Fingerprinting**: Automatic error grouping for alert reduction
@@ -139,14 +144,14 @@ Errors are categorized by **kind** and **severity** for consistent handling:
 
 ```ts
 type ErrorKind =
-  | 'business'      // Business rule violations
-  | 'validation'    // Input validation errors
-  | 'auth'          // Authentication/authorization
-  | 'rate_limit'    // Rate limiting
-  | 'not_found'     // Resource not found
-  | 'conflict'      // Resource conflicts
-  | 'dependency'    // External service failures
-  | 'internal';     // System errors
+  | 'business' // Business rule violations
+  | 'validation' // Input validation errors
+  | 'auth' // Authentication/authorization
+  | 'rate_limit' // Rate limiting
+  | 'not_found' // Resource not found
+  | 'conflict' // Resource conflicts
+  | 'dependency' // External service failures
+  | 'internal'; // System errors
 
 type ErrorSeverity = 'fatal' | 'error' | 'warning' | 'info' | 'debug';
 ```
@@ -328,7 +333,15 @@ runWithRetry<T>(
 ```ts
 type ErrorSeverity = 'fatal' | 'error' | 'warning' | 'info' | 'debug';
 
-type ErrorKind = 'business' | 'validation' | 'auth' | 'rate_limit' | 'not_found' | 'conflict' | 'dependency' | 'internal';
+type ErrorKind =
+  | 'business'
+  | 'validation'
+  | 'auth'
+  | 'rate_limit'
+  | 'not_found'
+  | 'conflict'
+  | 'dependency'
+  | 'internal';
 
 type RetryBackoff = 'linear' | 'exponential' | 'fixed';
 
@@ -661,27 +674,29 @@ app.use((req, res, next) => {
 });
 
 // Error handling middleware
-app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  // Normalize error
-  const kitiumError = toKitiumError(error, {
-    code: 'internal/server_error',
-    message: 'An unexpected error occurred',
-    statusCode: 500,
-    severity: 'error',
-    kind: 'internal',
-    retryable: false,
-  });
+app.use(
+  (error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    // Normalize error
+    const kitiumError = toKitiumError(error, {
+      code: 'internal/server_error',
+      message: 'An unexpected error occurred',
+      statusCode: 500,
+      severity: 'error',
+      kind: 'internal',
+      retryable: false,
+    });
 
-  // Enrich with request context
-  const enrichedError = enrichError(kitiumError, req.context);
+    // Enrich with request context
+    const enrichedError = enrichError(kitiumError, req.context);
 
-  // Log error
-  logError(enrichedError);
+    // Log error
+    logError(enrichedError);
 
-  // Send Problem Details response
-  const problem = problemDetailsFrom(enrichedError);
-  res.status(problem.status || 500).json(problem);
-});
+    // Send Problem Details response
+    const problem = problemDetailsFrom(enrichedError);
+    res.status(problem.status || 500).json(problem);
+  }
+);
 ```
 
 ### Tracing Integration
@@ -801,7 +816,8 @@ class CircuitBreaker {
 
   async call(operation: () => Promise<any>) {
     if (this.state === 'open') {
-      if (Date.now() - this.lastFailureTime > 60000) { // 1 minute timeout
+      if (Date.now() - this.lastFailureTime > 60000) {
+        // 1 minute timeout
         this.state = 'half-open';
       } else {
         throw new DependencyError({
@@ -878,6 +894,7 @@ class ErrorBoundary extends React.Component {
 ## Best Practices
 
 ### 1. Use Typed Error Subclasses
+
 ```ts
 // ✅ Good
 throw new ValidationError({ code: 'validation/invalid_email', ... });
@@ -887,6 +904,7 @@ throw new KitiumError({ code: 'validation/invalid_email', ... });
 ```
 
 ### 2. Register Errors Early
+
 ```ts
 // ✅ Register at startup
 app.on('ready', () => {
@@ -896,6 +914,7 @@ app.on('ready', () => {
 ```
 
 ### 3. Enrich Context Immediately
+
 ```ts
 // ✅ Enrich when error occurs
 try {
@@ -910,6 +929,7 @@ try {
 ```
 
 ### 4. Use Problem Details for APIs
+
 ```ts
 // ✅ Standardized responses
 const problem = problemDetailsFrom(error);
@@ -917,6 +937,7 @@ res.status(problem.status).json(problem);
 ```
 
 ### 5. Implement Retry Logic
+
 ```ts
 // ✅ Use built-in retry
 const result = await runWithRetry(operation, {
@@ -926,6 +947,7 @@ const result = await runWithRetry(operation, {
 ```
 
 ### 6. Protect Sensitive Data
+
 ```ts
 // ✅ Automatic redaction
 httpErrorRegistry.register({
@@ -936,6 +958,7 @@ httpErrorRegistry.register({
 ```
 
 ### 7. Monitor Error Metrics
+
 ```ts
 // ✅ Track and alert
 const metrics = getErrorMetrics();
@@ -947,6 +970,7 @@ if (metrics.errorsBySeverity.error > 100) {
 ## Migration Guide
 
 ### From Generic Errors
+
 ```ts
 // Before
 throw new Error('User not found');
@@ -960,6 +984,7 @@ throw new NotFoundError({
 ```
 
 ### From Manual HTTP Responses
+
 ```ts
 // Before
 res.status(404).json({ error: 'Not found' });
@@ -970,6 +995,7 @@ res.status(problem.status).json(problem);
 ```
 
 ### From Basic Retry Logic
+
 ```ts
 // Before
 let attempts = 0;

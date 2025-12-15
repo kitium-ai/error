@@ -3,5 +3,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   ...baseConfig,
-  // Add your custom config here
+  test: {
+    ...baseConfig.test,
+    setupFiles: ['./vitest.setup.ts'],
+  },
 });

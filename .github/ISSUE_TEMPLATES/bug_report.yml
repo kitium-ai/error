@@ -1,8 +1,8 @@
 ---
 name: Bug Report
 about: Create a report to help us improve
-title: "[BUG] "
-labels: ["bug", "triage"]
+title: '[BUG] '
+labels: ['bug', 'triage']
 assignees: []
 
 body:
@@ -59,7 +59,7 @@ body:
     attributes:
       label: Environment
       description: Please provide details about your environment.
-      placeholder: "OS: Windows 11, Node: 18.17.0, pnpm: 8.6.0"
+      placeholder: 'OS: Windows 11, Node: 18.17.0, pnpm: 8.6.0'
     validations:
       required: true
 

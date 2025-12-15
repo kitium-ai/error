@@ -19,7 +19,36 @@ import type {
 } from './types';
 
 const DEFAULT_DOCS_URL = 'https://kitiumai.com/docs/errors';
-const log = getLogger();
+const CONTEXT_KEYS_TO_EXCLUDE = new Set(['correlationId', 'requestId'] as const);
+
+function sanitizeContext(context: ErrorContext | undefined): {
+  correlationId?: string;
+  requestId?: string;
+  context?: ErrorContext;
+} {
+  if (!context) {
+    return {};
+  }
+
+  const correlationId =
+    typeof context.correlationId === 'string' ? context.correlationId : undefined;
+  const requestId = typeof context.requestId === 'string' ? context.requestId : undefined;
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(context)) {
+    if (CONTEXT_KEYS_TO_EXCLUDE.has(key as 'correlationId' | 'requestId')) {
+      continue;
+    }
+    // eslint-disable-next-line security/detect-object-injection
+    sanitized[key] = value;
+  }
+
+  return {
+    correlationId,
+    requestId,
+    context: Object.keys(sanitized).length ? (sanitized as ErrorContext) : undefined,
+  };
+}
 
 function assignIfDefined(target: Record<string, unknown>, key: string, value: unknown): void {
   if (value === undefined) {
@@ -70,11 +99,12 @@ function getToProblem(entry: ErrorRegistryEntryLike): ErrorRegistryEntry['toProb
   return typeof toProblem === 'function' ? toProblem : undefined;
 }
 
-function getInstance(context: ErrorContext | undefined): string | undefined {
-  if (!context) {
-    return undefined;
+function getInstance(error: ErrorShape): string | undefined {
+  if (error instanceof KitiumError) {
+    return firstDefined(error.correlationId, error.requestId);
   }
-  return firstDefined(context.correlationId, context.requestId);
+
+  return firstDefined(error.context?.correlationId, error.context?.requestId);
 }
 
 function asNumber(value: unknown): number | undefined {
@@ -291,6 +321,8 @@ export class KitiumError extends Error implements ErrorShape {
   readonly i18nParams?: Record<string, unknown>;
   readonly redact?: string[];
   readonly context?: ErrorContext;
+  readonly correlationId?: string;
+  readonly requestId?: string;
   readonly rateLimit?: RateLimitInfo;
   readonly cause?: unknown;
 
@@ -326,19 +358,10 @@ export class KitiumError extends Error implements ErrorShape {
       ['cause', shape.cause],
     ]);
 
-    // Ensure context has required fields
-    if (shape.context) {
-      this.context = {
-        ...shape.context,
-        correlationId: shape.context.correlationId || generateCorrelationId(),
-        requestId: shape.context.requestId || generateRequestId(),
-      };
-    } else {
-      this.context = {
-        correlationId: generateCorrelationId(),
-        requestId: generateRequestId(),
-      };
-    }
+    const sanitized = sanitizeContext(shape.context);
+    this.context = sanitized.context;
+    this.correlationId = sanitized.correlationId ?? generateCorrelationId();
+    this.requestId = sanitized.requestId ?? generateRequestId();
 
     // Update metrics
     errorMetrics.totalErrors++;
@@ -414,7 +437,7 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
       title: userMessage ?? error.message,
     };
 
-    const instance = getInstance(error.context);
+    const instance = getInstance(error);
     assignDefinedEntries(problem as unknown as Record<string, unknown>, [
       ['status', status],
       ['detail', error.help],
@@ -589,6 +612,7 @@ export function logError(error: KitiumError): void {
   // Extract the actual Error object from cause if available
   const errorObject = error.cause instanceof Error ? error.cause : error;
 
+  const log = getLogger();
   const loggers = {
     fatal: () => log.error(error.message, payload, errorObject),
     error: () => log.error(error.message, payload, errorObject),
@@ -643,11 +667,11 @@ function setBasicErrorAttributes(span: TraceSpanLike, error: KitiumError): void 
 }
 
 function setContextAttributes(span: TraceSpanLike, error: KitiumError): void {
-  if (error.context?.requestId) {
-    span.setAttribute('kitium.error.request_id', error.context.requestId);
+  if (error.requestId) {
+    span.setAttribute('kitium.error.request_id', error.requestId);
   }
-  if (error.context?.correlationId) {
-    span.setAttribute('kitium.error.correlation_id', error.context.correlationId);
+  if (error.correlationId) {
+    span.setAttribute('kitium.error.correlation_id', error.correlationId);
   }
   if (error.context?.idempotencyKey) {
     span.setAttribute('kitium.error.idempotency_key', error.context.idempotencyKey);
@@ -680,13 +704,22 @@ export function problemDetailsFrom(error: KitiumError): ProblemDetails {
 }
 
 export function enrichError(error: KitiumError, context: Record<string, unknown>): KitiumError {
-  const mergedContext: ErrorContext = {
-    correlationId: error.context?.correlationId ?? generateCorrelationId(),
-    requestId: error.context?.requestId ?? generateRequestId(),
-    ...error.context,
-    ...context,
-  };
-  return new KitiumError({ ...error.toJSON(), context: mergedContext }, false);
+  const extra = sanitizeContext(context as ErrorContext);
+  const mergedContext = {
+    ...(error.context ?? {}),
+    ...(extra.context ?? {}),
+  } as ErrorContext;
+
+  const correlationId = firstDefined(extra.correlationId, error.correlationId);
+  const requestId = firstDefined(extra.requestId, error.requestId);
+
+  const rawContext = {
+    ...(correlationId ? { correlationId } : {}),
+    ...(requestId ? { requestId } : {}),
+    ...mergedContext,
+  } as ErrorContext;
+
+  return new KitiumError({ ...error.toJSON(), context: rawContext }, false);
 }
 
 function computeDelay(baseDelay: number, backoff: RetryBackoff, attempt: number): number {
@@ -830,8 +863,8 @@ function ensureErrorHasIdempotencyContext(error: unknown, idempotencyKey: string
         ...kitiumError.toJSON(),
         context: {
           ...kitiumError.context,
-          correlationId: kitiumError.context?.correlationId ?? generateCorrelationId(),
-          requestId: kitiumError.context?.requestId ?? generateRequestId(),
+          correlationId: kitiumError.correlationId ?? generateCorrelationId(),
+          requestId: kitiumError.requestId ?? generateRequestId(),
           idempotencyKey,
         },
       },
@@ -849,53 +882,13 @@ function ensureErrorHasIdempotencyContext(error: unknown, idempotencyKey: string
  */
 export function getErrorFingerprint(error: KitiumError | ErrorShape): string {
   if (error instanceof KitiumError) {
-    const shape = error.toJSON();
-    // Use registry fingerprint if available
-    const entry = httpErrorRegistry.resolve(shape.code);
+    const entry = httpErrorRegistry.resolve(error.code);
     if (entry?.fingerprint) {
       return entry.fingerprint;
     }
-
-    // Generate enhanced fingerprint including context and stack info
-    const components = [shape.code, shape.kind, shape.severity, shape.statusCode?.toString()];
-
-    // Include source if available
-    if (shape.source) {
-      components.push(shape.source);
-    }
-
-    // Include stack trace hash if cause is an Error
-    if (shape.cause instanceof Error && shape.cause.stack) {
-      // Simple hash of stack trace for grouping similar stack traces
-      const stackHash = simpleHash(shape.cause.stack.split('\n').slice(0, 5).join('\n'));
-      components.push(stackHash.toString());
-    }
-
-    // Include rate limit info if present
-    if (shape.rateLimit) {
-      components.push('rate_limited');
-    }
-
-    return components.filter(Boolean).join(':');
+    return `${error.code}:${error.kind}`;
   }
   return `${error.code}:${error.kind}`;
-}
-
-/**
- * Simple hash function for generating fingerprints
- * @param str - String to hash
- * @returns Numeric hash
- */
-function simpleHash(string_: string): number {
-  let hash = 0;
-  for (let index = 0; index < string_.length; index++) {
-    const char = string_.charCodeAt(index);
-    // eslint-disable-next-line no-bitwise
-    hash = (hash << 5) - hash + char;
-    // eslint-disable-next-line no-bitwise
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  return Math.abs(hash);
 }
 
 /**

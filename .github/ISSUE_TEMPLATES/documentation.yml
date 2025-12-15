@@ -1,8 +1,8 @@
 ---
 name: Documentation Issue
 about: Report issues with documentation
-title: "[DOCS] "
-labels: ["documentation", "triage"]
+title: '[DOCS] '
+labels: ['documentation', 'triage']
 assignees: []
 
 body:
@@ -24,7 +24,7 @@ body:
     attributes:
       label: Location
       description: Where is this documentation located?
-      placeholder: "README.md, docs/setup.md, etc."
+      placeholder: 'README.md, docs/setup.md, etc.'
     validations:
       required: true
 
