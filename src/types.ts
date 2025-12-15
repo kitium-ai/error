@@ -15,23 +15,23 @@ export type ErrorLifecycle = 'draft' | 'active' | 'deprecated';
 
 export type RetryBackoff = 'linear' | 'exponential' | 'fixed';
 
-export interface RetryInfo {
+export type RetryInfo = {
   readonly retryable: boolean;
   readonly retryDelay?: number;
   readonly maxRetries?: number;
   readonly backoff?: RetryBackoff;
-}
+};
 
-export interface ErrorContext {
+export type ErrorContext = {
   readonly correlationId?: string;
   readonly requestId?: string;
   readonly spanId?: string;
   readonly tenantId?: string;
   readonly userId?: string;
   readonly [key: string]: unknown;
-}
+};
 
-export interface ErrorShape {
+export type ErrorShape = {
   readonly code: string;
   readonly message: string;
   readonly statusCode?: number;
@@ -51,52 +51,52 @@ export interface ErrorShape {
   readonly redact?: string[];
   readonly context?: ErrorContext;
   readonly cause?: unknown;
-}
+};
 
-export interface ProblemDetails {
+export type ProblemDetails = {
   readonly type?: string;
   readonly title: string;
   readonly status?: number;
   readonly detail?: string;
   readonly instance?: string;
   readonly extensions?: Record<string, unknown>;
-}
+};
 
-export interface ErrorRegistryEntry extends ErrorShape {
+export type ErrorRegistryEntry = ErrorShape & {
   readonly fingerprint?: string;
   readonly toProblem?: (error: ErrorShape) => ProblemDetails;
-}
+};
 
-export interface ErrorRegistry {
-  register(entry: ErrorRegistryEntry): void;
-  resolve(code: string): ErrorRegistryEntry | undefined;
-  toProblemDetails(error: ErrorShape): ProblemDetails;
-}
+export type ErrorRegistry = {
+  register: (entry: ErrorRegistryEntry) => void;
+  resolve: (code: string) => ErrorRegistryEntry | undefined;
+  toProblemDetails: (error: ErrorShape) => ProblemDetails;
+};
 
-export interface ErrorMetrics {
+export type ErrorMetrics = {
   readonly totalErrors: number;
   readonly errorsByKind: Record<ErrorKind, number>;
   readonly errorsBySeverity: Record<ErrorSeverity, number>;
   readonly retryableErrors: number;
   readonly nonRetryableErrors: number;
-}
+};
 
-export interface RetryOutcome<T> {
+export type RetryOutcome<T> = {
   readonly attempts: number;
   readonly result?: T;
   readonly error?: unknown;
   readonly lastDelayMs?: number;
-}
+};
 
-export interface RetryOptions {
+export type RetryOptions = {
   readonly maxAttempts?: number;
   readonly baseDelayMs?: number;
   readonly backoff?: RetryBackoff;
   readonly onAttempt?: (attempt: number, error: ErrorShape) => void;
-}
+};
 
-export interface TraceSpanLike {
-  setAttribute(key: string, value: unknown): void;
-  recordException(exception: unknown): void;
-  setStatus(status: { code: number; message?: string }): void;
-}
+export type TraceSpanLike = {
+  setAttribute: (key: string, value: unknown) => void;
+  recordException: (exception: unknown) => void;
+  setStatus: (status: { code: number; message?: string }) => void;
+};

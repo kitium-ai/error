@@ -1,21 +1,109 @@
 import { getLogger } from '@kitiumai/logger';
-import {
+
+import type {
+  ErrorContext,
   ErrorKind,
+  ErrorLifecycle,
+  ErrorMetrics,
   ErrorRegistry,
   ErrorRegistryEntry,
   ErrorSeverity,
   ErrorShape,
   ProblemDetails,
-  ErrorContext,
-  ErrorMetrics,
   RetryBackoff,
-  RetryOutcome,
   RetryOptions,
+  RetryOutcome,
   TraceSpanLike,
 } from './types';
 
 const DEFAULT_DOCS_URL = 'https://docs.kitium.ai/errors';
 const log = getLogger();
+
+function assignIfDefined(target: Record<string, unknown>, key: string, value: unknown): void {
+  if (value === undefined) {
+    return;
+  }
+  target[key] = value;
+}
+
+function assignDefinedEntries(
+  target: Record<string, unknown>,
+  entries: ReadonlyArray<readonly [key: string, value: unknown]>
+): void {
+  for (const [key, value] of entries) {
+    assignIfDefined(target, key, value);
+  }
+}
+
+function firstDefined<T>(...values: ReadonlyArray<T | undefined>): T | undefined {
+  for (const value of values) {
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function firstDefinedOr<T>(fallback: T, ...values: ReadonlyArray<T | undefined>): T {
+  const value = firstDefined(...values);
+  return value === undefined ? fallback : value;
+}
+
+type ErrorRegistryEntryLike = ErrorRegistryEntry | Partial<ErrorRegistryEntry> | undefined;
+
+function entryField<K extends keyof ErrorRegistryEntry>(
+  entry: ErrorRegistryEntryLike,
+  field: K
+): ErrorRegistryEntry[K] | undefined {
+  if (!entry) {
+    return undefined;
+  }
+  return (entry as ErrorRegistryEntry)[field];
+}
+
+function getToProblem(entry: ErrorRegistryEntryLike): ErrorRegistryEntry['toProblem'] | undefined {
+  const toProblem = entryField(entry, 'toProblem');
+  return typeof toProblem === 'function' ? toProblem : undefined;
+}
+
+function getInstance(context: ErrorContext | undefined): string | undefined {
+  if (!context) {
+    return undefined;
+  }
+  return firstDefined(context.correlationId, context.requestId);
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? (value as string[]) : undefined;
+}
+
+function asRetryBackoff(value: unknown): RetryBackoff | undefined {
+  const normalized = typeof value === 'string' ? value : '';
+  return normalized === 'linear' || normalized === 'exponential' || normalized === 'fixed'
+    ? normalized
+    : undefined;
+}
+
+function asLifecycle(value: unknown): ErrorLifecycle | undefined {
+  const normalized = typeof value === 'string' ? value : '';
+  return normalized === 'draft' || normalized === 'active' || normalized === 'deprecated'
+    ? normalized
+    : undefined;
+}
+
+function delayMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 /**
  * Type guard to check if value is a plain object
@@ -55,6 +143,16 @@ function redactValueAtPath(
 }
 
 function applyRedactions(
+  context: ErrorContext,
+  redactPaths: string[] | undefined,
+  redaction?: string
+): ErrorContext;
+function applyRedactions(
+  context: ErrorContext | undefined,
+  redactPaths: string[] | undefined,
+  redaction?: string
+): ErrorContext | undefined;
+function applyRedactions(
   context: ErrorContext | undefined,
   redactPaths: string[] | undefined,
   redaction = '[REDACTED]'
@@ -84,8 +182,8 @@ const errorMetrics: {
     business: 0,
     validation: 0,
     auth: 0,
-    rate_limit: 0,
-    not_found: 0,
+    ['rate_limit']: 0,
+    ['not_found']: 0,
     conflict: 0,
     dependency: 0,
     internal: 0,
@@ -137,7 +235,7 @@ export class KitiumError extends Error implements ErrorShape {
   readonly statusCode?: number;
   readonly severity: ErrorSeverity;
   readonly kind: ErrorKind;
-  readonly lifecycle?: ErrorShape['lifecycle'];
+  readonly lifecycle?: ErrorLifecycle;
   readonly schemaVersion?: string;
   readonly retryable: boolean;
   readonly retryDelay?: number;
@@ -162,23 +260,26 @@ export class KitiumError extends Error implements ErrorShape {
     validateLifecycle(shape.lifecycle);
 
     this.code = shape.code;
-    this.statusCode = shape.statusCode;
     this.severity = shape.severity;
     this.kind = shape.kind;
-    this.lifecycle = shape.lifecycle;
-    this.schemaVersion = shape.schemaVersion;
     this.retryable = shape.retryable;
-    this.retryDelay = shape.retryDelay;
-    this.maxRetries = shape.maxRetries;
-    this.backoff = shape.backoff;
-    this.help = shape.help;
-    this.docs = shape.docs;
-    this.source = shape.source;
-    this.userMessage = shape.userMessage;
-    this.i18nKey = shape.i18nKey;
-    this.redact = shape.redact;
-    this.context = shape.context;
-    this.cause = shape.cause;
+
+    assignDefinedEntries(this as unknown as Record<string, unknown>, [
+      ['statusCode', shape.statusCode],
+      ['lifecycle', shape.lifecycle],
+      ['schemaVersion', shape.schemaVersion],
+      ['retryDelay', shape.retryDelay],
+      ['maxRetries', shape.maxRetries],
+      ['backoff', shape.backoff],
+      ['help', shape.help],
+      ['docs', shape.docs],
+      ['source', shape.source],
+      ['userMessage', shape.userMessage],
+      ['i18nKey', shape.i18nKey],
+      ['redact', shape.redact],
+      ['context', shape.context],
+      ['cause', shape.cause],
+    ]);
 
     // Update metrics
     errorMetrics.totalErrors++;
@@ -192,29 +293,36 @@ export class KitiumError extends Error implements ErrorShape {
   }
 
   toJSON(): ErrorShape {
-    return {
+    const shape: ErrorShape = {
       code: this.code,
       message: this.message,
-      ...(this.statusCode !== undefined ? { statusCode: this.statusCode } : {}),
       severity: this.severity,
       kind: this.kind,
-      ...(this.lifecycle !== undefined ? { lifecycle: this.lifecycle } : {}),
-      ...(this.schemaVersion !== undefined ? { schemaVersion: this.schemaVersion } : {}),
       retryable: this.retryable,
-      ...(this.retryDelay !== undefined ? { retryDelay: this.retryDelay } : {}),
-      ...(this.maxRetries !== undefined ? { maxRetries: this.maxRetries } : {}),
-      ...(this.backoff !== undefined ? { backoff: this.backoff } : {}),
-      ...(this.help !== undefined ? { help: this.help } : {}),
-      ...(this.docs !== undefined ? { docs: this.docs } : {}),
-      ...(this.source !== undefined ? { source: this.source } : {}),
-      ...(this.userMessage !== undefined ? { userMessage: this.userMessage } : {}),
-      ...(this.i18nKey !== undefined ? { i18nKey: this.i18nKey } : {}),
-      ...(this.redact !== undefined ? { redact: this.redact } : {}),
-      ...(this.context !== undefined
-        ? { context: applyRedactions(this.context, this.redact) }
-        : {}),
-      ...(this.cause !== undefined ? { cause: this.cause } : {}),
     };
+
+    assignDefinedEntries(shape as unknown as Record<string, unknown>, [
+      ['statusCode', this.statusCode],
+      ['lifecycle', this.lifecycle],
+      ['schemaVersion', this.schemaVersion],
+      ['retryDelay', this.retryDelay],
+      ['maxRetries', this.maxRetries],
+      ['backoff', this.backoff],
+      ['help', this.help],
+      ['docs', this.docs],
+      ['source', this.source],
+      ['userMessage', this.userMessage],
+      ['i18nKey', this.i18nKey],
+      ['redact', this.redact],
+      ['cause', this.cause],
+    ]);
+    assignIfDefined(
+      shape as unknown as Record<string, unknown>,
+      'context',
+      this.context !== undefined ? applyRedactions(this.context, this.redact) : undefined
+    );
+
+    return shape;
   }
 }
 
@@ -222,42 +330,59 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
   const entries = new Map<string, ErrorRegistryEntry>();
 
   const toProblemDetails = (error: ErrorShape): ProblemDetails => {
-    const entry = entries.get(error.code) ?? defaults;
-    const redactions = error.redact ?? entry?.redact;
+    const entry = firstDefined(entries.get(error.code), defaults);
+    const redactions = firstDefined(error.redact, entry?.redact);
     const context = applyRedactions(error.context, redactions);
-    const typeUrl = entry?.docs ?? error.docs ?? `${DEFAULT_DOCS_URL}/${error.code}`;
-    const status = error.statusCode ?? entry?.statusCode;
-    const userMessage = error.userMessage ?? entry?.userMessage;
-    const lifecycle = error.lifecycle ?? entry?.lifecycle;
+    const typeUrl = firstDefinedOr(
+      `${DEFAULT_DOCS_URL}/${error.code}`,
+      entryField(entry, 'docs'),
+      error.docs
+    );
+    const status = firstDefined(error.statusCode, entryField(entry, 'statusCode'));
+    const userMessage = firstDefined(error.userMessage, entryField(entry, 'userMessage'));
+    const lifecycle = firstDefined(error.lifecycle, entryField(entry, 'lifecycle'));
 
-    if (entry?.toProblem) {
-      return entry.toProblem(error);
+    const toProblem = getToProblem(entry);
+    if (toProblem) {
+      return toProblem(error);
     }
 
-    return {
+    const problem: ProblemDetails = {
       type: typeUrl,
       title: userMessage ?? error.message,
-      ...(status !== undefined ? { status } : {}),
-      ...(error.help !== undefined ? { detail: error.help } : {}),
-      ...((error.context?.correlationId ?? error.context?.requestId)
-        ? { instance: error.context?.correlationId ?? error.context?.requestId }
-        : {}),
-      extensions: {
-        code: error.code,
-        severity: error.severity,
-        retryable: error.retryable,
-        ...(lifecycle !== undefined ? { lifecycle } : {}),
-        ...(error.schemaVersion !== undefined ? { schemaVersion: error.schemaVersion } : {}),
-        ...(error.retryDelay !== undefined ? { retryDelay: error.retryDelay } : {}),
-        ...(error.maxRetries !== undefined ? { maxRetries: error.maxRetries } : {}),
-        ...(error.backoff !== undefined ? { backoff: error.backoff } : {}),
-        kind: error.kind,
-        ...(context !== undefined ? { context } : {}),
-        ...(userMessage !== undefined ? { userMessage } : {}),
-        ...((error.i18nKey ?? entry?.i18nKey) ? { i18nKey: error.i18nKey ?? entry?.i18nKey } : {}),
-        ...((error.source ?? entry?.source) ? { source: error.source ?? entry?.source } : {}),
-      },
     };
+
+    const instance = getInstance(error.context);
+    assignDefinedEntries(problem as unknown as Record<string, unknown>, [
+      ['status', status],
+      ['detail', error.help],
+      ['instance', instance],
+    ]);
+
+    const extensions: Record<string, unknown> = {
+      code: error.code,
+      severity: error.severity,
+      retryable: error.retryable,
+      kind: error.kind,
+    };
+
+    const i18nKey = firstDefined(error.i18nKey, entryField(entry, 'i18nKey'));
+    const source = firstDefined(error.source, entryField(entry, 'source'));
+
+    assignDefinedEntries(extensions, [
+      ['lifecycle', lifecycle],
+      ['schemaVersion', error.schemaVersion],
+      ['retryDelay', error.retryDelay],
+      ['maxRetries', error.maxRetries],
+      ['backoff', error.backoff],
+      ['context', context],
+      ['userMessage', userMessage],
+      ['i18nKey', i18nKey],
+      ['source', source],
+    ]);
+
+    assignIfDefined(problem as unknown as Record<string, unknown>, 'extensions', extensions);
+    return problem;
   };
 
   return {
@@ -273,42 +398,42 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
   };
 }
 
+function normalizeErrorShapeLike(shape: Record<string, unknown>): ErrorShape {
+  const normalized: ErrorShape = {
+    code: String(shape['code']),
+    message: String(shape['message']),
+    severity: (shape['severity'] as ErrorSeverity) ?? 'error',
+    kind: (shape['kind'] as ErrorKind) ?? 'internal',
+    retryable: Boolean(shape['retryable']),
+  };
+
+  assignDefinedEntries(normalized as unknown as Record<string, unknown>, [
+    ['statusCode', asNumber(shape['statusCode'])],
+    ['retryDelay', asNumber(shape['retryDelay'])],
+    ['maxRetries', asNumber(shape['maxRetries'])],
+    ['backoff', asRetryBackoff(shape['backoff'])],
+    ['help', asString(shape['help'])],
+    ['docs', asString(shape['docs'])],
+    ['source', asString(shape['source'])],
+    ['lifecycle', asLifecycle(shape['lifecycle'])],
+    ['schemaVersion', asString(shape['schemaVersion'])],
+    ['userMessage', asString(shape['userMessage'])],
+    ['i18nKey', asString(shape['i18nKey'])],
+    ['redact', asStringArray(shape['redact'])],
+    ['context', isObject(shape['context']) ? (shape['context'] as ErrorContext) : undefined],
+    ['cause', 'cause' in shape ? shape['cause'] : undefined],
+  ]);
+
+  return normalized;
+}
+
 export function toKitiumError(error: unknown, fallback?: ErrorShape): KitiumError {
   if (error instanceof KitiumError) {
     return error;
   }
 
   if (isObject(error) && 'code' in error && 'message' in error) {
-    const shape = error as Record<string, unknown>;
-    return new KitiumError(
-      {
-        code: String(shape['code']),
-        message: String(shape['message']),
-        statusCode: typeof shape['statusCode'] === 'number' ? shape['statusCode'] : undefined,
-        severity: (shape['severity'] as ErrorSeverity) ?? 'error',
-        kind: (shape['kind'] as ErrorKind) ?? 'internal',
-        retryable: Boolean(shape['retryable']),
-        retryDelay: typeof shape['retryDelay'] === 'number' ? shape['retryDelay'] : undefined,
-        maxRetries: typeof shape['maxRetries'] === 'number' ? shape['maxRetries'] : undefined,
-        backoff: ['linear', 'exponential', 'fixed'].includes(String(shape['backoff']))
-          ? (shape['backoff'] as RetryBackoff)
-          : undefined,
-        help: typeof shape['help'] === 'string' ? shape['help'] : undefined,
-        docs: typeof shape['docs'] === 'string' ? shape['docs'] : undefined,
-        source: typeof shape['source'] === 'string' ? shape['source'] : undefined,
-        lifecycle: ['draft', 'active', 'deprecated'].includes(String(shape['lifecycle']))
-          ? (shape['lifecycle'] as ErrorShape['lifecycle'])
-          : undefined,
-        schemaVersion:
-          typeof shape['schemaVersion'] === 'string' ? shape['schemaVersion'] : undefined,
-        userMessage: typeof shape['userMessage'] === 'string' ? shape['userMessage'] : undefined,
-        i18nKey: typeof shape['i18nKey'] === 'string' ? shape['i18nKey'] : undefined,
-        redact: Array.isArray(shape['redact']) ? (shape['redact'] as string[]) : undefined,
-        context: isObject(shape['context']) ? (shape['context'] as ErrorContext) : undefined,
-        cause: shape['cause'],
-      },
-      false // Don't validate code for normalized errors
-    );
+    return new KitiumError(normalizeErrorShapeLike(error), false);
   }
 
   if (fallback) {
@@ -328,37 +453,42 @@ export function toKitiumError(error: unknown, fallback?: ErrorShape): KitiumErro
 
 export function logError(error: KitiumError): void {
   const entry = httpErrorRegistry.resolve(error.code);
-  const context = applyRedactions(error.context, error.redact ?? entry?.redact);
-  const payload = {
+  const payload: Record<string, unknown> = {
     code: error.code,
     message: error.message,
     severity: error.severity,
     retryable: error.retryable,
-    ...(error.statusCode !== undefined ? { statusCode: error.statusCode } : {}),
-    ...(error.retryDelay !== undefined ? { retryDelay: error.retryDelay } : {}),
-    ...(error.maxRetries !== undefined ? { maxRetries: error.maxRetries } : {}),
-    ...(error.backoff !== undefined ? { backoff: error.backoff } : {}),
-    ...(context !== undefined ? { context } : {}),
-    ...(error.source !== undefined ? { source: error.source } : {}),
-    ...(error.schemaVersion !== undefined ? { schemaVersion: error.schemaVersion } : {}),
-    ...(error.lifecycle !== undefined ? { lifecycle: error.lifecycle } : {}),
     fingerprint: getErrorFingerprint(error),
   };
 
-  switch (error.severity) {
-    case 'fatal':
-    case 'error':
-      log?.error(error.message, payload);
-      break;
-    case 'warning':
-      log?.warn(error.message, payload);
-      break;
-    case 'info':
-      log?.info(error.message, payload);
-      break;
-    default:
-      log?.debug(error.message, payload);
+  assignDefinedEntries(payload, [
+    ['statusCode', error.statusCode],
+    ['retryDelay', error.retryDelay],
+    ['maxRetries', error.maxRetries],
+    ['backoff', error.backoff],
+    ['source', error.source],
+    ['schemaVersion', error.schemaVersion],
+    ['lifecycle', error.lifecycle],
+  ]);
+
+  let redactions = error.redact;
+  if (redactions === undefined) {
+    redactions = entry?.redact;
   }
+  const context = applyRedactions(error.context, redactions);
+  if (context !== undefined) {
+    payload['context'] = context;
+  }
+
+  const loggers = {
+    fatal: () => log?.error(error.message, payload),
+    error: () => log?.error(error.message, payload),
+    warning: () => log?.warn(error.message, payload),
+    info: () => log?.info(error.message, payload),
+    debug: () => log?.debug(error.message, payload),
+  } as const;
+
+  loggers[error.severity]();
 }
 
 const SPAN_STATUS_ERROR = 2;
@@ -412,37 +542,120 @@ function computeDelay(baseDelay: number, backoff: RetryBackoff, attempt: number)
   return baseDelay * 2 ** Math.max(0, attempt - 1);
 }
 
+type OperationAttemptResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+async function tryOperation<T>(operation: () => Promise<T>): Promise<OperationAttemptResult<T>> {
+  try {
+    const value = await operation();
+    return { ok: true, value };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+function callOnAttempt(
+  onAttempt: RetryOptions['onAttempt'] | undefined,
+  attempt: number,
+  error: KitiumError
+): void {
+  if (!onAttempt) {
+    return;
+  }
+  onAttempt(attempt, error);
+}
+
+function shouldRetryAfter(error: KitiumError, attempt: number, maxAttempts: number): boolean {
+  if (!error.retryable) {
+    return false;
+  }
+  return attempt < maxAttempts;
+}
+
+function computeRetryDelayMs(
+  error: KitiumError,
+  baseDelay: number,
+  defaultBackoff: RetryBackoff,
+  attempt: number
+): number {
+  let delay = baseDelay;
+  if (error.retryDelay !== undefined) {
+    delay = error.retryDelay;
+  }
+
+  let backoff = defaultBackoff;
+  if (error.backoff !== undefined) {
+    backoff = error.backoff;
+  }
+
+  return computeDelay(delay, backoff, attempt);
+}
+
+function buildRetryOutcome<T>(attempts: number, lastDelayMs: number | undefined): RetryOutcome<T> {
+  const outcome: RetryOutcome<T> = { attempts };
+  if (lastDelayMs !== undefined) {
+    (outcome as unknown as Record<string, unknown>)['lastDelayMs'] = lastDelayMs;
+  }
+  return outcome;
+}
+
+function buildSuccessOutcome<T>(
+  attempts: number,
+  result: T,
+  lastDelayMs: number | undefined
+): RetryOutcome<T> {
+  const outcome = buildRetryOutcome<T>(attempts, lastDelayMs);
+  (outcome as unknown as Record<string, unknown>)['result'] = result;
+  return outcome;
+}
+
+function buildErrorOutcome<T>(
+  attempts: number,
+  error: unknown,
+  lastDelayMs: number | undefined
+): RetryOutcome<T> {
+  const outcome = buildRetryOutcome<T>(attempts, lastDelayMs);
+  (outcome as unknown as Record<string, unknown>)['error'] = error;
+  return outcome;
+}
+
 export async function runWithRetry<T>(
   operation: () => Promise<T>,
   options?: RetryOptions
 ): Promise<RetryOutcome<T>> {
-  const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
-  const baseDelay = options?.baseDelayMs ?? 200;
-  const backoff = options?.backoff ?? 'exponential';
+  let maxAttempts = 3;
+  if (options?.maxAttempts !== undefined) {
+    maxAttempts = options.maxAttempts;
+  }
+  maxAttempts = Math.max(1, maxAttempts);
 
-  let attempt = 0;
-  let lastDelay: number | undefined;
-
-  while (attempt < maxAttempts) {
-    attempt++;
-    try {
-      const result = await operation();
-      return { attempts: attempt, result, lastDelayMs: lastDelay };
-    } catch (err) {
-      const kitiumError = toKitiumError(err);
-      options?.onAttempt?.(attempt, kitiumError);
-      if (!kitiumError.retryable || attempt >= maxAttempts) {
-        return { attempts: attempt, error: kitiumError, lastDelayMs: lastDelay };
-      }
-
-      const delay = kitiumError.retryDelay ?? baseDelay;
-      const backoffStrategy = kitiumError.backoff ?? backoff;
-      lastDelay = computeDelay(delay, backoffStrategy, attempt);
-      await new Promise((resolve) => setTimeout(resolve, lastDelay));
-    }
+  let baseDelay = 200;
+  if (options?.baseDelayMs !== undefined) {
+    baseDelay = options.baseDelayMs;
   }
 
-  return { attempts: attempt, lastDelayMs: lastDelay };
+  let defaultBackoff: RetryBackoff = 'exponential';
+  if (options?.backoff !== undefined) {
+    defaultBackoff = options.backoff;
+  }
+  let lastDelay: number | undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const outcome = await tryOperation(operation);
+    if (outcome.ok) {
+      return buildSuccessOutcome(attempt, outcome.value, lastDelay);
+    }
+
+    const kitiumError = toKitiumError(outcome.error);
+    callOnAttempt(options?.onAttempt, attempt, kitiumError);
+    if (!shouldRetryAfter(kitiumError, attempt, maxAttempts)) {
+      return buildErrorOutcome(attempt, kitiumError, lastDelay);
+    }
+
+    lastDelay = computeRetryDelayMs(kitiumError, baseDelay, defaultBackoff, attempt);
+    await delayMs(lastDelay);
+  }
+
+  return buildRetryOutcome(maxAttempts, lastDelay);
 }
 
 /**
@@ -487,8 +700,8 @@ export function resetErrorMetrics(): void {
     business: 0,
     validation: 0,
     auth: 0,
-    rate_limit: 0,
-    not_found: 0,
+    ['rate_limit']: 0,
+    ['not_found']: 0,
     conflict: 0,
     dependency: 0,
     internal: 0,

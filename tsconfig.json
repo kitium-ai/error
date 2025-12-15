@@ -1,13 +1,10 @@
 {
   "extends": "@kitiumai/config/tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "baseUrl": "./src",
-    "exactOptionalPropertyTypes": false,
-    "paths": {
-      "*": ["./*"]
-    }
+    "baseUrl": ".",
+    "outDir": "./dist"
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  "include": [
+    "src"
+  ]
 }

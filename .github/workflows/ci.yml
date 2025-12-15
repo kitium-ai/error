@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/ashishyd/kitiumai-dev:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shared setup (build, lint, test, typecheck)
+        uses: ./.github/actions/kitium-shared-setup
+        with:
+          run-build: "true"
+          run-lint: "true"
+          lint-command: pnpm run lint
+          run-tests: "true"
+          test-command: pnpm run test
+          run-typecheck: "true"
+          typecheck-command: pnpm run typecheck

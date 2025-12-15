@@ -1,9 +1,7 @@
-import { createKitiumVitestConfig } from '@kitiumai/vitest-helpers/config';
+import baseConfig from '@kitiumai/config/vitest.config.base.js';
 import { defineConfig } from 'vitest/config';
 
-export default defineConfig(
-  createKitiumVitestConfig({
-    preset: 'library',
-    environment: 'node',
-  })
-);
+export default defineConfig({
+  ...baseConfig,
+  // Add your custom config here
+});

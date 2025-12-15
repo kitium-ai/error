@@ -1,55 +1,49 @@
-import baseConfig from '@kitiumai/config/eslint.config.base.js';
-import { createKitiumConfig } from '@kitiumai/lint';
+/**
+ * ESLint configuration for @kitiumai/error.
+ * Composes the strict @kitiumai/lint presets (base + TS + Node + Security + Kitium).
+ */
 
-export default createKitiumConfig({
-  baseConfig,
-  ignorePatterns: ['dist/**', '**/*.d.ts', '**/*.d.cts'],
-  additionalRules: {
-    // Error package specific rules
-    complexity: ['warn', 20], // Error handling can be complex
-    '@typescript-eslint/naming-convention': [
-      'error',
-      {
-        selector: 'default',
-        format: ['camelCase'],
-        leadingUnderscore: 'allow',
-        trailingUnderscore: 'allow',
-      },
-      {
-        selector: 'variable',
-        format: ['camelCase', 'UPPER_CASE'],
-        leadingUnderscore: 'allow',
-        trailingUnderscore: 'allow',
-      },
-      {
-        selector: 'typeLike',
-        format: ['PascalCase'],
-      },
-      {
-        selector: 'enumMember',
-        format: ['PascalCase', 'UPPER_CASE'],
-      },
-      {
-        // Allow snake_case for error kind properties (they're enum-like values)
-        selector: 'objectLiteralProperty',
-        format: ['camelCase', 'snake_case'],
-      },
-    ],
+import {
+  eslintBaseConfig,
+  eslintKitiumConfig,
+  eslintNodeConfig,
+  eslintSecurityConfig,
+  eslintTypeScriptConfig,
+} from '@kitiumai/lint';
+
+const normalize = (config) => (Array.isArray(config) ? config : [config]);
+
+const sharedPresets = [
+  ...normalize(eslintBaseConfig),
+  ...normalize(eslintTypeScriptConfig),
+  ...normalize(eslintNodeConfig),
+  ...normalize(eslintSecurityConfig),
+  ...normalize(eslintKitiumConfig),
+];
+
+export default [
+  {
+    ignores: ['dist/', 'node_modules/', 'coverage/', '.turbo/', '**/*.d.ts'],
   },
-  overrides: [
-    {
-      files: ['src/index.ts'],
-      rules: {
-        // Allow snake_case enum-like keys in metrics maps
-        '@typescript-eslint/naming-convention': 'off',
-      },
+  ...sharedPresets,
+  {
+    name: 'kitium/error-overrides',
+    files: ['**/*.{ts,tsx,js,cjs,mjs}'],
+    rules: {
+      // Re-apply the shared import restriction with ESLint v9-compatible schema.
+      'no-restricted-imports': [
+        'warn',
+        {
+          patterns: [
+            {
+              group: ['../../*', '../../../*'],
+              message: 'Prefer module aliases over deep relative imports for maintainability.',
+            },
+          ],
+        },
+      ],
+      // Disabled temporarily due to eslint-plugin-import relying on CJS-only minimatch.
+      'import/order': 'off',
     },
-    {
-      files: ['**/*.test.ts'],
-      rules: {
-        '@typescript-eslint/no-explicit-any': 'off', // Allow any in tests
-        '@typescript-eslint/explicit-function-return-type': 'off',
-      },
-    },
-  ],
-});
+  },
+];

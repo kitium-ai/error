@@ -1,0 +1,186 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  create:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: "Release"
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/ashishyd/kitiumai-dev:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory $GITHUB_WORKSPACE
+
+      - name: Environment health check
+        run: |
+          echo "📋 Environment diagnostics:"
+          echo "Node: $(node --version)"
+          echo "NPM: $(npm --version)"
+          echo "Git: $(git --version)"
+          echo "Working directory: $(pwd)"
+          echo "User: $(whoami)"
+
+      - name: Get tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME="${{ inputs.tag }}"
+          else
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Processing tag: $TAG_NAME"
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=$(echo "${{ steps.tag.outputs.tag }}" | sed 's/^v//')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Extracted version: $VERSION"
+
+      - name: Shared setup (install + verify)
+        uses: ./.github/actions/kitium-shared-setup
+        with:
+          run-build: "true"
+          run-tests: "true"
+          run-lint: "true"
+          run-typecheck: "true"
+
+      - name: Security checks
+        run: |
+          pnpm exec kitiumai-config security check || echo "⚠️ Security check failed, continuing..."
+
+      - name: Verify package version
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          TARGET_VERSION="${{ steps.version.outputs.version }}"
+
+          if [ "$CURRENT_VERSION" = "$TARGET_VERSION" ]; then
+            echo "✅ Version matches tag: $TARGET_VERSION"
+          else
+            echo "❌ Version mismatch detected!"
+            echo "   package.json version: $CURRENT_VERSION"
+            echo "   Tag version: $TARGET_VERSION"
+            echo ""
+            echo "⚠️  The package.json version must match the tag version before publishing."
+            echo "   Please update package.json to version $TARGET_VERSION and commit the change."
+            echo "   Then re-run the tag-release workflow."
+            exit 1
+          fi
+
+      - name: Configure npm for trusted publishing
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "❌ NPM_TOKEN is required for publishing"
+            exit 1
+          fi
+
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
+          npm config set provenance true
+          echo "✅ npm configured for trusted publishing"
+
+      - name: Check if version already published
+        id: version_check
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PACKAGE_NAME="error"
+
+          if npm view "${PACKAGE_NAME}@${VERSION}" version 2>/dev/null; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "⏭️  Version ${VERSION} already published to npm, skipping publish step"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+            echo "📦 Version ${VERSION} not found on npm, proceeding with publish"
+          fi
+
+      - name: Publish to NPM
+        if: steps.version_check.outputs.already_published != 'true'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --access public --provenance
+
+      - name: Generate SBOM
+        continue-on-error: true
+        run: |
+          pnpm exec kitiumai-config observability setup || echo "⚠️ Observability setup failed"
+          echo '{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"metadata":{"component":{"name":"error","version":"${{ steps.version.outputs.version }}"}}}' > sbom.json
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          release_name: "error ${{ steps.version.outputs.version }}"
+          body: |
+            ## 🚀 Release error@${{ steps.version.outputs.version }}
+
+            ### Installation
+            ```bash
+            npm install error@${{ steps.version.outputs.version }}
+            # or
+            pnpm add error@${{ steps.version.outputs.version }}
+            ```
+
+            ### Documentation
+            📖 [API Reference](https://github.com/kitiumai/config/blob/main/README.md)
+
+            ### Security
+            🔒 [SBOM](https://github.com/kitiumai/config/releases/download/${{ steps.tag.outputs.tag }}/sbom.json)
+          draft: false
+          prerelease: false
+
+      - name: Upload SBOM to release
+        continue-on-error: true
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: sbom.json
+          asset_name: sbom.json
+          asset_content_type: application/json
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Successfully released error@${{ steps.version.outputs.version }}"
+          echo "📦 Published to NPM: https://www.npmjs.com/package/error/v/${{ steps.version.outputs.version }}"
+          echo "🏷️  GitHub Release: https://github.com/kitiumai/config/releases/tag/${{ steps.tag.outputs.tag }}"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Failed to release error@${{ steps.version.outputs.version }}"
+          echo "Please check the workflow logs for details"

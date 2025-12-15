@@ -7,7 +7,6 @@ Please do **NOT** open a public issue for security vulnerabilities.
 Instead, please email: **security@kitiumai.com**
 
 Include the following information:
-
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
