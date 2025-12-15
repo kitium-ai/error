@@ -115,15 +115,15 @@
   "sideEffects": false,
   "repository": {
     "type": "git",
-    "url": "https://github.com/kitiumai/error.git"
+    "url": "https://github.com/kitium-ai/error.git"
   },
   "publishConfig": {
     "access": "public"
   },
   "bugs": {
-    "url": "https://github.com/kitiumai/error/issues"
+    "url": "https://github.com/kitium-ai/error/issues"
   },
-  "homepage": "https://github.com/kitiumai/error#readme",
+  "homepage": "https://github.com/kitium-ai/error#readme",
   "dependencies": {
     "@kitiumai/logger": "^3.0.1",
     "@kitiumai/types": "^3.0.0"
