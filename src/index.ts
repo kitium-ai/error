@@ -43,11 +43,13 @@ function sanitizeContext(context: ErrorContext | undefined): {
     sanitized[key] = value;
   }
 
-  return {
-    correlationId,
-    requestId,
-    context: Object.keys(sanitized).length ? (sanitized as ErrorContext) : undefined,
-  };
+  const result: { correlationId?: string; requestId?: string; context?: ErrorContext } = {};
+  assignIfDefined(result as unknown as Record<string, unknown>, 'correlationId', correlationId);
+  assignIfDefined(result as unknown as Record<string, unknown>, 'requestId', requestId);
+  if (Object.keys(sanitized).length) {
+    result.context = sanitized as ErrorContext;
+  }
+  return result;
 }
 
 function assignIfDefined(target: Record<string, unknown>, key: string, value: unknown): void {
@@ -359,7 +361,9 @@ export class KitiumError extends Error implements ErrorShape {
     ]);
 
     const sanitized = sanitizeContext(shape.context);
-    this.context = sanitized.context;
+    if (sanitized.context !== undefined) {
+      this.context = sanitized.context;
+    }
     this.correlationId = sanitized.correlationId ?? generateCorrelationId();
     this.requestId = sanitized.requestId ?? generateRequestId();
 
