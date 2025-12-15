@@ -112,7 +112,7 @@ jobs:
         id: version_check
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          PACKAGE_NAME="error"
+          PACKAGE_NAME="@kitiumai/error"
 
           if npm view "${PACKAGE_NAME}@${VERSION}" version 2>/dev/null; then
             echo "already_published=true" >> "$GITHUB_OUTPUT"

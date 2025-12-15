@@ -9,20 +9,23 @@ import type {
   ErrorRegistryEntry,
   ErrorSeverity,
   ErrorShape,
+  I18nMessage,
   ProblemDetails,
+  RateLimitInfo,
   RetryBackoff,
   RetryOptions,
   RetryOutcome,
   TraceSpanLike,
 } from './types';
 
-const DEFAULT_DOCS_URL = 'https://docs.kitium.ai/errors';
+const DEFAULT_DOCS_URL = 'https://kitiumai.com/docs/errors';
 const log = getLogger();
 
 function assignIfDefined(target: Record<string, unknown>, key: string, value: unknown): void {
   if (value === undefined) {
     return;
   }
+  // eslint-disable-next-line security/detect-object-injection
   target[key] = value;
 }
 
@@ -46,7 +49,7 @@ function firstDefined<T>(...values: ReadonlyArray<T | undefined>): T | undefined
 
 function firstDefinedOr<T>(fallback: T, ...values: ReadonlyArray<T | undefined>): T {
   const value = firstDefined(...values);
-  return value === undefined ? fallback : value;
+  return value ?? fallback;
 }
 
 type ErrorRegistryEntryLike = ErrorRegistryEntry | Partial<ErrorRegistryEntry> | undefined;
@@ -58,6 +61,7 @@ function entryField<K extends keyof ErrorRegistryEntry>(
   if (!entry) {
     return undefined;
   }
+  // eslint-disable-next-line security/detect-object-injection
   return (entry as ErrorRegistryEntry)[field];
 }
 
@@ -99,6 +103,39 @@ function asLifecycle(value: unknown): ErrorLifecycle | undefined {
     : undefined;
 }
 
+/**
+ * Generates a unique request ID
+ * @returns A unique request identifier
+ */
+export function generateRequestId(): string {
+  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+/**
+ * Generates a unique correlation ID
+ * @returns A unique correlation identifier
+ */
+export function generateCorrelationId(): string {
+  return `corr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+/**
+ * Generates a unique idempotency key
+ * @returns A unique idempotency key
+ */
+export function generateIdempotencyKey(): string {
+  return `idemp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+/**
+ * Generates documentation URL for an error code
+ * @param code - Error code
+ * @returns Documentation URL
+ */
+export function generateDocumentationUrl(code: string): string {
+  return `${DEFAULT_DOCS_URL}/${code}`;
+}
+
 function delayMs(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -115,7 +152,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function cloneValue<T>(value: T): T {
-  return isObject(value) ? (JSON.parse(JSON.stringify(value)) as T) : value;
+  return isObject(value) ? structuredClone(value) : value;
 }
 
 function redactValueAtPath(
@@ -132,10 +169,12 @@ function redactValueAtPath(
     return;
   }
   if (tail.length === 0) {
+    // eslint-disable-next-line security/detect-object-injection
     target[head] = redaction;
     return;
   }
 
+  // eslint-disable-next-line security/detect-object-injection
   const next = target[head];
   if (isObject(next)) {
     redactValueAtPath(next, tail, redaction);
@@ -167,6 +206,7 @@ function applyRedactions(
 
 // Error code validation pattern: lowercase alphanumeric with underscores and forward slashes
 // Examples: "auth/forbidden", "validation/required_field", "internal/server_error"
+// eslint-disable-next-line security/detect-unsafe-regex
 const ERROR_CODE_PATTERN = /^[a-z0-9_]+(\/[a-z0-9_]+)*$/;
 
 // Error metrics tracking
@@ -186,6 +226,8 @@ const errorMetrics: {
     ['not_found']: 0,
     conflict: 0,
     dependency: 0,
+    network: 0,
+    timeout: 0,
     internal: 0,
   },
   errorsBySeverity: {
@@ -246,8 +288,10 @@ export class KitiumError extends Error implements ErrorShape {
   readonly source?: string;
   readonly userMessage?: string;
   readonly i18nKey?: string;
+  readonly i18nParams?: Record<string, unknown>;
   readonly redact?: string[];
   readonly context?: ErrorContext;
+  readonly rateLimit?: RateLimitInfo;
   readonly cause?: unknown;
 
   constructor(shape: ErrorShape, validateCode = true) {
@@ -276,10 +320,25 @@ export class KitiumError extends Error implements ErrorShape {
       ['source', shape.source],
       ['userMessage', shape.userMessage],
       ['i18nKey', shape.i18nKey],
+      ['i18nParams', shape.i18nParams],
       ['redact', shape.redact],
-      ['context', shape.context],
+      ['rateLimit', shape.rateLimit],
       ['cause', shape.cause],
     ]);
+
+    // Ensure context has required fields
+    if (shape.context) {
+      this.context = {
+        ...shape.context,
+        correlationId: shape.context.correlationId || generateCorrelationId(),
+        requestId: shape.context.requestId || generateRequestId(),
+      };
+    } else {
+      this.context = {
+        correlationId: generateCorrelationId(),
+        requestId: generateRequestId(),
+      };
+    }
 
     // Update metrics
     errorMetrics.totalErrors++;
@@ -313,7 +372,9 @@ export class KitiumError extends Error implements ErrorShape {
       ['source', this.source],
       ['userMessage', this.userMessage],
       ['i18nKey', this.i18nKey],
+      ['i18nParams', this.i18nParams],
       ['redact', this.redact],
+      ['rateLimit', this.rateLimit],
       ['cause', this.cause],
     ]);
     assignIfDefined(
@@ -326,6 +387,7 @@ export class KitiumError extends Error implements ErrorShape {
   }
 }
 
+// eslint-disable-next-line max-lines-per-function
 export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): ErrorRegistry {
   const entries = new Map<string, ErrorRegistryEntry>();
 
@@ -334,7 +396,7 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
     const redactions = firstDefined(error.redact, entry?.redact);
     const context = applyRedactions(error.context, redactions);
     const typeUrl = firstDefinedOr(
-      `${DEFAULT_DOCS_URL}/${error.code}`,
+      generateDocumentationUrl(error.code),
       entryField(entry, 'docs'),
       error.docs
     );
@@ -378,7 +440,9 @@ export function createErrorRegistry(defaults?: Partial<ErrorRegistryEntry>): Err
       ['context', context],
       ['userMessage', userMessage],
       ['i18nKey', i18nKey],
+      ['i18nParams', error.i18nParams],
       ['source', source],
+      ['rateLimit', error.rateLimit],
     ]);
 
     assignIfDefined(problem as unknown as Record<string, unknown>, 'extensions', extensions);
@@ -419,10 +483,39 @@ function normalizeErrorShapeLike(shape: Record<string, unknown>): ErrorShape {
     ['schemaVersion', asString(shape['schemaVersion'])],
     ['userMessage', asString(shape['userMessage'])],
     ['i18nKey', asString(shape['i18nKey'])],
+    [
+      'i18nParams',
+      isObject(shape['i18nParams']) ? (shape['i18nParams'] as Record<string, unknown>) : undefined,
+    ],
     ['redact', asStringArray(shape['redact'])],
-    ['context', isObject(shape['context']) ? (shape['context'] as ErrorContext) : undefined],
+    ['rateLimit', isObject(shape['rateLimit']) ? (shape['rateLimit'] as RateLimitInfo) : undefined],
     ['cause', 'cause' in shape ? shape['cause'] : undefined],
   ]);
+
+  // Handle context with required fields
+  const context = isObject(shape['context']) ? (shape['context'] as Record<string, unknown>) : {};
+  const normalizedContext: ErrorContext = {
+    correlationId: asString(context['correlationId']) ?? generateCorrelationId(),
+    requestId: asString(context['requestId']) ?? generateRequestId(),
+  };
+
+  assignDefinedEntries(normalizedContext as unknown as Record<string, unknown>, [
+    ['spanId', asString(context['spanId'])],
+    ['tenantId', asString(context['tenantId'])],
+    ['userId', asString(context['userId'])],
+    ['idempotencyKey', asString(context['idempotencyKey'])],
+    ['locale', asString(context['locale'])],
+  ]);
+
+  // Add any additional context fields
+  for (const [key, value] of Object.entries(context)) {
+    if (!(key in normalizedContext)) {
+      // eslint-disable-next-line security/detect-object-injection
+      (normalizedContext as unknown as Record<string, unknown>)[key] = value;
+    }
+  }
+
+  assignIfDefined(normalized as unknown as Record<string, unknown>, 'context', normalizedContext);
 
   return normalized;
 }
@@ -437,7 +530,16 @@ export function toKitiumError(error: unknown, fallback?: ErrorShape): KitiumErro
   }
 
   if (fallback) {
-    return new KitiumError(fallback);
+    // Ensure fallback has required context fields
+    const fallbackWithContext = {
+      ...fallback,
+      context: {
+        correlationId: generateCorrelationId(),
+        requestId: generateRequestId(),
+        ...fallback.context,
+      },
+    };
+    return new KitiumError(fallbackWithContext);
   }
 
   return new KitiumError({
@@ -447,6 +549,10 @@ export function toKitiumError(error: unknown, fallback?: ErrorShape): KitiumErro
     severity: 'error',
     kind: 'internal',
     retryable: false,
+    context: {
+      correlationId: generateCorrelationId(),
+      requestId: generateRequestId(),
+    },
     cause: error,
   });
 }
@@ -469,23 +575,26 @@ export function logError(error: KitiumError): void {
     ['source', error.source],
     ['schemaVersion', error.schemaVersion],
     ['lifecycle', error.lifecycle],
+    ['i18nKey', error.i18nKey],
+    ['i18nParams', error.i18nParams],
+    ['rateLimit', error.rateLimit],
   ]);
 
-  let redactions = error.redact;
-  if (redactions === undefined) {
-    redactions = entry?.redact;
-  }
+  const redactions = error.redact ?? entry?.redact;
   const context = applyRedactions(error.context, redactions);
   if (context !== undefined) {
     payload['context'] = context;
   }
 
+  // Extract the actual Error object from cause if available
+  const errorObject = error.cause instanceof Error ? error.cause : error;
+
   const loggers = {
-    fatal: () => log?.error(error.message, payload),
-    error: () => log?.error(error.message, payload),
-    warning: () => log?.warn(error.message, payload),
-    info: () => log?.info(error.message, payload),
-    debug: () => log?.debug(error.message, payload),
+    fatal: () => log.error(error.message, payload, errorObject),
+    error: () => log.error(error.message, payload, errorObject),
+    warning: () => log.warn(error.message, payload),
+    info: () => log.info(error.message, payload),
+    debug: () => log.debug(error.message, payload),
   } as const;
 
   loggers[error.severity]();
@@ -497,12 +606,31 @@ export function recordException(error: KitiumError, span?: TraceSpanLike): void 
   if (!span) {
     return;
   }
+
   const fingerprint = getErrorFingerprint(error);
+
+  // Set basic error attributes
   span.setAttribute('kitium.error.code', error.code);
   span.setAttribute('kitium.error.kind', error.kind);
   span.setAttribute('kitium.error.severity', error.severity);
   span.setAttribute('kitium.error.retryable', error.retryable);
   span.setAttribute('kitium.error.fingerprint', fingerprint);
+
+  // Set optional attributes
+  setOptionalSpanAttributes(span, error);
+
+  // Record the exception
+  span.recordException({ ...error.toJSON(), name: error.name });
+  span.setStatus({ code: SPAN_STATUS_ERROR, message: error.message });
+}
+
+function setOptionalSpanAttributes(span: TraceSpanLike, error: KitiumError): void {
+  setBasicErrorAttributes(span, error);
+  setContextAttributes(span, error);
+  setRateLimitAttributes(span, error);
+}
+
+function setBasicErrorAttributes(span: TraceSpanLike, error: KitiumError): void {
   if (error.lifecycle) {
     span.setAttribute('kitium.error.lifecycle', error.lifecycle);
   }
@@ -512,8 +640,32 @@ export function recordException(error: KitiumError, span?: TraceSpanLike): void 
   if (error.statusCode) {
     span.setAttribute('http.status_code', error.statusCode);
   }
-  span.recordException({ ...error.toJSON(), name: error.name });
-  span.setStatus({ code: SPAN_STATUS_ERROR, message: error.message });
+}
+
+function setContextAttributes(span: TraceSpanLike, error: KitiumError): void {
+  if (error.context?.requestId) {
+    span.setAttribute('kitium.error.request_id', error.context.requestId);
+  }
+  if (error.context?.correlationId) {
+    span.setAttribute('kitium.error.correlation_id', error.context.correlationId);
+  }
+  if (error.context?.idempotencyKey) {
+    span.setAttribute('kitium.error.idempotency_key', error.context.idempotencyKey);
+  }
+}
+
+function setRateLimitAttributes(span: TraceSpanLike, error: KitiumError): void {
+  if (error.rateLimit) {
+    if (error.rateLimit.limit !== undefined) {
+      span.setAttribute('kitium.error.rate_limit.limit', error.rateLimit.limit);
+    }
+    if (error.rateLimit.remaining !== undefined) {
+      span.setAttribute('kitium.error.rate_limit.remaining', error.rateLimit.remaining);
+    }
+    if (error.rateLimit.resetTime !== undefined) {
+      span.setAttribute('kitium.error.rate_limit.reset_time', error.rateLimit.resetTime);
+    }
+  }
 }
 
 export const httpErrorRegistry = createErrorRegistry({
@@ -528,7 +680,12 @@ export function problemDetailsFrom(error: KitiumError): ProblemDetails {
 }
 
 export function enrichError(error: KitiumError, context: Record<string, unknown>): KitiumError {
-  const mergedContext = { ...(error.context ?? {}), ...context };
+  const mergedContext: ErrorContext = {
+    correlationId: error.context?.correlationId ?? generateCorrelationId(),
+    requestId: error.context?.requestId ?? generateRequestId(),
+    ...error.context,
+    ...context,
+  };
   return new KitiumError({ ...error.toJSON(), context: mergedContext }, false);
 }
 
@@ -622,40 +779,67 @@ export async function runWithRetry<T>(
   operation: () => Promise<T>,
   options?: RetryOptions
 ): Promise<RetryOutcome<T>> {
-  let maxAttempts = 3;
-  if (options?.maxAttempts !== undefined) {
-    maxAttempts = options.maxAttempts;
-  }
-  maxAttempts = Math.max(1, maxAttempts);
+  const config = buildRetryConfig(options);
+  const idempotencyKey = options?.idempotencyKey ?? generateIdempotencyKey();
 
-  let baseDelay = 200;
-  if (options?.baseDelayMs !== undefined) {
-    baseDelay = options.baseDelayMs;
-  }
-
-  let defaultBackoff: RetryBackoff = 'exponential';
-  if (options?.backoff !== undefined) {
-    defaultBackoff = options.backoff;
-  }
-  let lastDelay: number | undefined;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  for (let attempt = 1; attempt <= config.maxAttempts; attempt++) {
     const outcome = await tryOperation(operation);
     if (outcome.ok) {
-      return buildSuccessOutcome(attempt, outcome.value, lastDelay);
+      return buildSuccessOutcome(attempt, outcome.value, config.lastDelay);
     }
 
-    const kitiumError = toKitiumError(outcome.error);
+    const kitiumError = ensureErrorHasIdempotencyContext(outcome.error, idempotencyKey);
     callOnAttempt(options?.onAttempt, attempt, kitiumError);
-    if (!shouldRetryAfter(kitiumError, attempt, maxAttempts)) {
-      return buildErrorOutcome(attempt, kitiumError, lastDelay);
+
+    if (!shouldRetryAfter(kitiumError, attempt, config.maxAttempts)) {
+      return buildErrorOutcome(attempt, kitiumError, config.lastDelay);
     }
 
-    lastDelay = computeRetryDelayMs(kitiumError, baseDelay, defaultBackoff, attempt);
-    await delayMs(lastDelay);
+    config.lastDelay = computeRetryDelayMs(
+      kitiumError,
+      config.baseDelay,
+      config.defaultBackoff,
+      attempt
+    );
+    await delayMs(config.lastDelay);
   }
 
-  return buildRetryOutcome(maxAttempts, lastDelay);
+  return buildRetryOutcome(config.maxAttempts, config.lastDelay);
+}
+
+function buildRetryConfig(options?: RetryOptions): {
+  maxAttempts: number;
+  baseDelay: number;
+  defaultBackoff: RetryBackoff;
+  lastDelay: number | undefined;
+} {
+  return {
+    maxAttempts: Math.max(1, options?.maxAttempts ?? 3),
+    baseDelay: options?.baseDelayMs ?? 200,
+    defaultBackoff: options?.backoff ?? 'exponential',
+    lastDelay: undefined as number | undefined,
+  };
+}
+
+function ensureErrorHasIdempotencyContext(error: unknown, idempotencyKey: string): KitiumError {
+  const kitiumError = toKitiumError(error);
+
+  if (!kitiumError.context?.idempotencyKey) {
+    return new KitiumError(
+      {
+        ...kitiumError.toJSON(),
+        context: {
+          ...kitiumError.context,
+          correlationId: kitiumError.context?.correlationId ?? generateCorrelationId(),
+          requestId: kitiumError.context?.requestId ?? generateRequestId(),
+          idempotencyKey,
+        },
+      },
+      false
+    );
+  }
+
+  return kitiumError;
 }
 
 /**
@@ -671,10 +855,47 @@ export function getErrorFingerprint(error: KitiumError | ErrorShape): string {
     if (entry?.fingerprint) {
       return entry.fingerprint;
     }
-    // Generate fingerprint from code and kind
-    return `${shape.code}:${shape.kind}`;
+
+    // Generate enhanced fingerprint including context and stack info
+    const components = [shape.code, shape.kind, shape.severity, shape.statusCode?.toString()];
+
+    // Include source if available
+    if (shape.source) {
+      components.push(shape.source);
+    }
+
+    // Include stack trace hash if cause is an Error
+    if (shape.cause instanceof Error && shape.cause.stack) {
+      // Simple hash of stack trace for grouping similar stack traces
+      const stackHash = simpleHash(shape.cause.stack.split('\n').slice(0, 5).join('\n'));
+      components.push(stackHash.toString());
+    }
+
+    // Include rate limit info if present
+    if (shape.rateLimit) {
+      components.push('rate_limited');
+    }
+
+    return components.filter(Boolean).join(':');
   }
   return `${error.code}:${error.kind}`;
+}
+
+/**
+ * Simple hash function for generating fingerprints
+ * @param str - String to hash
+ * @returns Numeric hash
+ */
+function simpleHash(string_: string): number {
+  let hash = 0;
+  for (let index = 0; index < string_.length; index++) {
+    const char = string_.charCodeAt(index);
+    // eslint-disable-next-line no-bitwise
+    hash = (hash << 5) - hash + char;
+    // eslint-disable-next-line no-bitwise
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return Math.abs(hash);
 }
 
 /**
@@ -704,6 +925,8 @@ export function resetErrorMetrics(): void {
     ['not_found']: 0,
     conflict: 0,
     dependency: 0,
+    network: 0,
+    timeout: 0,
     internal: 0,
   };
   errorMetrics.errorsBySeverity = {
@@ -860,6 +1083,102 @@ export class InternalError extends KitiumError {
     );
     this.name = 'InternalError';
   }
+}
+
+export class NetworkError extends KitiumError {
+  constructor(shape: Omit<ErrorShape, 'kind'> & Partial<Pick<ErrorShape, 'kind'>>) {
+    super(
+      {
+        ...shape,
+        kind: shape.kind ?? 'network',
+        severity: shape.severity ?? 'error',
+        statusCode: shape.statusCode ?? 502,
+        retryable: shape.retryable ?? true,
+        retryDelay: shape.retryDelay ?? 1000,
+        backoff: shape.backoff ?? 'exponential',
+        maxRetries: shape.maxRetries ?? 3,
+      },
+      true
+    );
+    this.name = 'NetworkError';
+  }
+}
+
+export class TimeoutError extends KitiumError {
+  constructor(shape: Omit<ErrorShape, 'kind'> & Partial<Pick<ErrorShape, 'kind'>>) {
+    super(
+      {
+        ...shape,
+        kind: shape.kind ?? 'timeout',
+        severity: shape.severity ?? 'warning',
+        statusCode: shape.statusCode ?? 504,
+        retryable: shape.retryable ?? true,
+        retryDelay: shape.retryDelay ?? 500,
+        backoff: shape.backoff ?? 'linear',
+        maxRetries: shape.maxRetries ?? 2,
+      },
+      true
+    );
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * Resolves an internationalized message for an error
+ * @param error - Error to resolve message for
+ * @param locale - Target locale (defaults to error context locale or 'en')
+ * @returns Localized message or fallback
+ */
+export function resolveI18nMessage(error: KitiumError, locale?: string): string {
+  const targetLocale = locale ?? error.context?.locale ?? 'en';
+
+  // If no i18n key, return user message or default message
+  if (!error.i18nKey) {
+    return error.userMessage ?? error.message;
+  }
+
+  // TODO: Integrate with actual i18n system
+  // For now, return a placeholder that shows the key and params
+  const parameters = error.i18nParams ? JSON.stringify(error.i18nParams) : '';
+  const parametersSuffix = parameters ? ` ${parameters}` : '';
+  return `[${targetLocale}:${error.i18nKey}]${parametersSuffix}`;
+}
+
+export function createI18nMessage(
+  key: string,
+  parameters?: Record<string, unknown>,
+  fallback?: string
+): I18nMessage {
+  const result: { key: string; params?: Record<string, unknown>; fallback?: string } = { key };
+  if (parameters) {
+    result.params = parameters;
+  }
+  if (fallback) {
+    result.fallback = fallback;
+  }
+  return result as I18nMessage;
+}
+
+export function withI18n(
+  error: KitiumError,
+  i18nKey: string,
+  parameters?: Record<string, unknown>,
+  fallback?: string
+): KitiumError {
+  const shape = error.toJSON();
+  const result: typeof shape & {
+    i18nKey: string;
+    userMessage: string;
+    i18nParams?: Record<string, unknown>;
+  } = {
+    ...shape,
+    i18nKey,
+    userMessage: fallback ?? error.userMessage ?? error.message,
+  };
+  if (parameters) {
+    result.i18nParams = parameters;
+  }
+  return new KitiumError(result, false);
 }
 
 export * from './types';

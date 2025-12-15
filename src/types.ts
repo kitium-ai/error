@@ -8,6 +8,8 @@ export type ErrorKind =
   | 'not_found'
   | 'conflict'
   | 'dependency'
+  | 'network'
+  | 'timeout'
   | 'internal'
   | (string & {});
 
@@ -23,11 +25,13 @@ export type RetryInfo = {
 };
 
 export type ErrorContext = {
-  readonly correlationId?: string;
-  readonly requestId?: string;
+  readonly correlationId: string; // Now required
+  readonly requestId: string; // Now required
   readonly spanId?: string;
   readonly tenantId?: string;
   readonly userId?: string;
+  readonly idempotencyKey?: string; // New field for idempotency support
+  readonly locale?: string; // New field for i18n support
   readonly [key: string]: unknown;
 };
 
@@ -48,8 +52,10 @@ export type ErrorShape = {
   readonly source?: string;
   readonly userMessage?: string;
   readonly i18nKey?: string;
+  readonly i18nParams?: Record<string, unknown>; // New field for i18n parameters
   readonly redact?: string[];
   readonly context?: ErrorContext;
+  readonly rateLimit?: RateLimitInfo; // New field for rate limiting
   readonly cause?: unknown;
 };
 
@@ -93,6 +99,20 @@ export type RetryOptions = {
   readonly baseDelayMs?: number;
   readonly backoff?: RetryBackoff;
   readonly onAttempt?: (attempt: number, error: ErrorShape) => void;
+  readonly idempotencyKey?: string; // New field for idempotency support
+};
+
+export type RateLimitInfo = {
+  readonly limit?: number;
+  readonly remaining?: number;
+  readonly resetTime?: number;
+  readonly retryAfter?: number;
+};
+
+export type I18nMessage = {
+  readonly key: string;
+  readonly params?: Record<string, unknown>;
+  readonly fallback?: string;
 };
 
 export type TraceSpanLike = {
